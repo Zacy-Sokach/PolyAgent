@@ -6,7 +6,7 @@ set -e
 # Supports Linux and macOS
 
 REPO="Zacy-Sokach/PolyAgent"
-VERSION="${VERSION:-v25.12.13-nightly-1}"
+VERSION="${VERSION:-}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 # Colors for output
@@ -17,13 +17,13 @@ NC='\033[0m' # No Color
 
 # Get latest version from GitHub API
 get_latest_version() {
-    local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    local api_url="https://api.github.com/repos/${REPO}/tags"
     echo -e "${YELLOW}Fetching latest version from GitHub...${NC}"
     
     if command -v curl &> /dev/null; then
-        VERSION=$(curl -s "$api_url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        VERSION=$(curl -s "$api_url" | grep -o '"name": *"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
     elif command -v wget &> /dev/null; then
-        VERSION=$(wget -qO- "$api_url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        VERSION=$(wget -qO- "$api_url" | grep -o '"name": *"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
     else
         echo -e "${RED}Error: curl or wget is required but not installed.${NC}"
         exit 1

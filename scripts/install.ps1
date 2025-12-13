@@ -2,7 +2,7 @@
 # PowerShell script
 
 param(
-    [string]$Version = "",
+    [string]$Version,
     [string]$InstallDir = "$env:LOCALAPPDATA\PolyAgent"
 )
 
