@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Zacy-Sokach/PolyAgent/internal/mcp"
 	"github.com/Zacy-Sokach/PolyAgent/internal/utils"
 )
 
@@ -237,7 +238,7 @@ func (p *EditorParser) executeCommand(cmd *EditCommand) (string, error) {
 		}
 
 		// 使用现有的文件操作工具
-		if err := utils.CreateNewFile(cmd.FilePath, content); err != nil {
+		if err := mcp.CreateNewFile(cmd.FilePath, content); err != nil {
 			return "", err
 		}
 

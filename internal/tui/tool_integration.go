@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/Zacy-Sokach/PolyAgent/internal/api"
 	"github.com/Zacy-Sokach/PolyAgent/internal/mcp"
@@ -23,9 +24,26 @@ type ToolManager struct {
 }
 
 // NewToolManager 创建工具管理器
-func NewToolManager() *ToolManager {
+func NewToolManager(fileEngineConfig ...*mcp.FileEngineConfig) *ToolManager {
+	// 使用提供的配置或默认配置
+	var engineConfig *mcp.FileEngineConfig
+	if len(fileEngineConfig) > 0 && fileEngineConfig[0] != nil {
+		engineConfig = fileEngineConfig[0]
+	} else {
+		// 创建默认配置（当前工作目录）
+		wd, _ := os.Getwd()
+		defaultConfig := mcp.FileEngineConfig{
+			AllowedRoots:    []string{wd},
+			BlacklistedExts: []string{".exe", ".dll", ".so", ".dylib", ".bin"},
+			MaxFileSize:     10 * 1024 * 1024,
+			EnableCache:     true,
+			BackupDir:       ".polyagent-backups",
+		}
+		engineConfig = &defaultConfig
+	}
+	
 	// 创建 MCP 工具注册表
-	mcpRegistry := mcp.DefaultToolRegistry()
+	mcpRegistry := mcp.DefaultToolRegistry(engineConfig)
 
 	// 获取 MCP 工具并转换为 API 工具格式
 	var apiTools []api.Tool

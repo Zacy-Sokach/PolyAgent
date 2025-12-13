@@ -2,6 +2,7 @@ package utils
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,10 +52,122 @@ func NewEditor() *Editor {
 	}
 }
 
+// getSessionEditsPath 获取会话编辑历史文件路径
+func getSessionEditsPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("获取用户主目录失败: %w", err)
+	}
+	return filepath.Join(homeDir, ".config", "polyagent", "session_edits.json"), nil
+}
+
+// saveSessionEdits 保存会话编辑历史到磁盘
+func (e *Editor) saveSessionEdits() error {
+	if e.currentSession == nil {
+		return nil // 没有活跃会话，无需保存
+	}
+
+	editsPath, err := getSessionEditsPath()
+	if err != nil {
+		return err
+	}
+
+	// 确保目录存在
+	editsDir := filepath.Dir(editsPath)
+	if err := os.MkdirAll(editsDir, 0755); err != nil {
+		return fmt.Errorf("创建编辑历史目录失败: %w", err)
+	}
+
+	// 准备保存的数据
+	sessionData := struct {
+		SessionID string          `json:"session_id"`
+		Timestamp time.Time       `json:"timestamp"`
+		Edits     []EditOperation `json:"edits"`
+	}{
+		SessionID: e.currentSession.ID,
+		Timestamp: e.currentSession.Timestamp,
+		Edits:     e.sessionEdits,
+	}
+
+	data, err := json.MarshalIndent(sessionData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化编辑历史失败: %w", err)
+	}
+
+	if err := os.WriteFile(editsPath, data, 0644); err != nil {
+		return fmt.Errorf("写入编辑历史文件失败: %w", err)
+	}
+
+	return nil
+}
+
+// loadSessionEdits 从磁盘加载会话编辑历史
+func (e *Editor) loadSessionEdits() error {
+	editsPath, err := getSessionEditsPath()
+	if err != nil {
+		return err
+	}
+
+	// 检查文件是否存在
+	if _, err := os.Stat(editsPath); os.IsNotExist(err) {
+		return nil // 文件不存在，无需加载
+	}
+
+	data, err := os.ReadFile(editsPath)
+	if err != nil {
+		return fmt.Errorf("读取编辑历史文件失败: %w", err)
+	}
+
+	var sessionData struct {
+		SessionID string          `json:"session_id"`
+		Timestamp time.Time       `json:"timestamp"`
+		Edits     []EditOperation `json:"edits"`
+	}
+
+	if err := json.Unmarshal(data, &sessionData); err != nil {
+		return fmt.Errorf("解析编辑历史失败: %w", err)
+	}
+
+	// 恢复会话和编辑历史
+	e.currentSession = &SessionMarker{
+		ID:        sessionData.SessionID,
+		Timestamp: sessionData.Timestamp,
+		FileHashes: make(map[string]string),
+	}
+	e.sessionEdits = sessionData.Edits
+
+	return nil
+}
+
+// clearSessionEdits 清除磁盘上的会话编辑历史
+func clearSessionEdits() error {
+	editsPath, err := getSessionEditsPath()
+	if err != nil {
+		return err
+	}
+
+	if err := os.Remove(editsPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("清除编辑历史文件失败: %w", err)
+	}
+
+	return nil
+}
+
 // StartSession 开始新会话
 func (e *Editor) StartSession() error {
 	if e.currentSession != nil {
 		return fmt.Errorf("已有活跃会话，请先结束当前会话")
+	}
+
+	// 尝试加载之前的编辑历史（如果存在未正常结束的会话）
+	if err := e.loadSessionEdits(); err != nil {
+		fmt.Printf("警告: 加载编辑历史失败: %v\n", err)
+	}
+
+	// 如果加载到了编辑历史，恢复会话
+	if e.currentSession != nil {
+		fmt.Printf("恢复之前的编辑会话: %s\n", e.currentSession.ID)
+		return nil
 	}
 
 	// 获取当前目录所有代码文件
@@ -96,6 +209,11 @@ func (e *Editor) StartSession() error {
 
 // EndSession 结束当前会话
 func (e *Editor) EndSession() {
+	// 清除磁盘上的编辑历史
+	if err := clearSessionEdits(); err != nil {
+		fmt.Printf("警告: 清除编辑历史失败: %v\n", err)
+	}
+
 	e.currentSession = nil
 	e.sessionEdits = nil
 	// 保留 fileStates 供下次会话使用
@@ -131,6 +249,12 @@ func (e *Editor) InsertText(filePath string, offset int, content string) error {
 		Timestamp: time.Now(),
 	})
 
+	// 自动保存编辑历史到磁盘
+	if err := e.saveSessionEdits(); err != nil {
+		// 记录错误但不中断操作
+		fmt.Printf("警告: 保存编辑历史失败: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -161,6 +285,12 @@ func (e *Editor) DeleteText(filePath string, offset int, length int) error {
 		Content:   deletedContent,
 		Timestamp: time.Now(),
 	})
+
+	// 自动保存编辑历史到磁盘
+	if err := e.saveSessionEdits(); err != nil {
+		// 记录错误但不中断操作
+		fmt.Printf("警告: 保存编辑历史失败: %v\n", err)
+	}
 
 	return nil
 }

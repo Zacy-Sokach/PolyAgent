@@ -91,7 +91,6 @@ PolyAgent/
 │       ├── context.go    # 代码上下文读取
 │       ├── context_test.go # 上下文测试
 │       ├── editor.go     # 编辑器集成
-│       ├── file_ops.go   # 文件操作
 │       └── history.go    # 历史会话管理
 ├── AGENT.md              # 项目上下文文档
 ├── CAPABILITIES.md       # 能力说明文档
@@ -151,7 +150,6 @@ PolyAgent/
   - 代码文件识别
 - **context_test.go**: 上下文测试
 - **editor.go**: 编辑器集成
-- **file_ops.go**: 文件操作
 - **history.go**: 历史会话管理
 
 ## 核心功能

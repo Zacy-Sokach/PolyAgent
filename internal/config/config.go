@@ -9,9 +9,19 @@ import (
 )
 
 type Config struct {
-	APIKey       string `yaml:"api_key"`
-	Model        string `yaml:"model"`
-	TavilyAPIKey string `yaml:"tavily_api_key"`
+	APIKey       string           `yaml:"api_key"`
+	Model        string           `yaml:"model"`
+	TavilyAPIKey string           `yaml:"tavily_api_key"`
+	FileEngine   FileEngineConfig `yaml:"file_engine"`
+}
+
+type FileEngineConfig struct {
+	AllowedRoots    []string `yaml:"allowed_roots"`
+	BlacklistedExts []string `yaml:"blacklisted_exts"`
+	MaxFileSize     int64    `yaml:"max_file_size"`
+	EnableCache     bool     `yaml:"enable_cache"`
+	BackupDir       string   `yaml:"backup_dir"`
+	CacheTTLMinutes int      `yaml:"cache_ttl_minutes"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -22,7 +32,8 @@ func LoadConfig() (*Config, error) {
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return &Config{
-			Model: "glm-4.5",
+			Model:      "glm-4.5",
+			FileEngine: DefaultFileEngineConfig(),
 		}, nil
 	}
 
@@ -40,7 +51,24 @@ func LoadConfig() (*Config, error) {
 		config.Model = "glm-4.5"
 	}
 
+	// 设置 FileEngine 默认值
+	if config.FileEngine.MaxFileSize == 0 {
+		config.FileEngine = DefaultFileEngineConfig()
+	}
+
 	return &config, nil
+}
+
+func DefaultFileEngineConfig() FileEngineConfig {
+	wd, _ := os.Getwd()
+	return FileEngineConfig{
+		AllowedRoots:    []string{wd},
+		BlacklistedExts: []string{".exe", ".dll", ".so", ".dylib", ".bin"},
+		MaxFileSize:     10 * 1024 * 1024,
+		EnableCache:     true,
+		BackupDir:       ".polyagent-backups",
+		CacheTTLMinutes: 5,
+	}
 }
 
 func SaveConfig(config *Config) error {

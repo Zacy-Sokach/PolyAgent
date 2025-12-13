@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/yuin/goldmark"
@@ -14,6 +15,20 @@ import (
 
 	"github.com/yuin/goldmark/util"
 )
+
+// 全局Markdown渲染器单例
+var (
+	globalMarkdownRenderer *MarkdownRenderer
+	rendererOnce           sync.Once
+)
+
+// GetMarkdownRenderer 获取Markdown渲染器单例
+func GetMarkdownRenderer() *MarkdownRenderer {
+	rendererOnce.Do(func() {
+		globalMarkdownRenderer = NewMarkdownRenderer()
+	})
+	return globalMarkdownRenderer
+}
 
 // MarkdownRenderer TUI Markdown 渲染器
 type MarkdownRenderer struct {

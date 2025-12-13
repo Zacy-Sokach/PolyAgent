@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 
 	"github.com/Zacy-Sokach/PolyAgent/internal/config"
+	"github.com/Zacy-Sokach/PolyAgent/internal/mcp"
 	"github.com/Zacy-Sokach/PolyAgent/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -72,7 +73,16 @@ func main() {
 
 	// 检查是否在交互式终端中
 	if isTerminal() {
-		p := tea.NewProgram(tui.InitialModel(cfg.APIKey), tea.WithAltScreen())
+		// 创建 ToolManager，传入 FileEngine 配置（转换类型）
+		fileEngineConfig := mcp.FileEngineConfig{
+			AllowedRoots:    cfg.FileEngine.AllowedRoots,
+			BlacklistedExts: cfg.FileEngine.BlacklistedExts,
+			MaxFileSize:     cfg.FileEngine.MaxFileSize,
+			EnableCache:     cfg.FileEngine.EnableCache,
+			BackupDir:       cfg.FileEngine.BackupDir,
+		}
+		toolManager := tui.NewToolManager(&fileEngineConfig)
+		p := tea.NewProgram(tui.InitialModel(cfg.APIKey, toolManager), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("程序运行错误: %v\n", err)
 			os.Exit(1)

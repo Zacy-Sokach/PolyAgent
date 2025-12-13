@@ -49,7 +49,6 @@ PolyAgent/
 │   │   └── model_helpers.go    # 模型辅助函数
 │   └── utils/            # 工具函数
 │       ├── context.go    # 代码上下文读取
-│       ├── file_ops.go   # 文件操作
 │       ├── editor.go     # 编辑器集成
 │       ├── history.go    # 历史会话管理
 │       └── context_test.go # 上下文测试

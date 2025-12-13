@@ -3,16 +3,42 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 const (
 	baseURL = "https://open.bigmodel.cn/api/paas/v4"
 )
+
+// 全局共享的HTTP客户端，实现连接池化
+var (
+	sharedHTTPClient *http.Client
+	httpClientOnce   sync.Once
+)
+
+// getSharedHTTPClient 返回共享的HTTP客户端实例
+func getSharedHTTPClient() *http.Client {
+	httpClientOnce.Do(func() {
+		sharedHTTPClient = &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 50,        // 从10增加到50，提高并发性能
+				IdleConnTimeout:     90 * time.Second,
+				DisableCompression:  false,      // 启用压缩，减少传输数据量
+				MaxConnsPerHost:     100,        // 新增：限制每个主机的最大连接数
+			},
+		}
+	})
+	return sharedHTTPClient
+}
 
 type Client struct {
 	apiKey string
@@ -25,7 +51,7 @@ type Client struct {
 func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey: apiKey,
-		client: &http.Client{},
+		client: getSharedHTTPClient(),
 	}
 }
 
@@ -173,6 +199,7 @@ func (c *Client) chatStream(req ChatRequest) (*ChatResponse, error) {
 	}
 	resp.Body.Close()
 
+	// 只在最后需要时调用String()，避免中间转换
 	contentBytes, _ := json.Marshal(contentBuilder.String())
 	fullResponse.Choices = []Choice{
 		{
@@ -270,35 +297,77 @@ func (c *Client) StreamChat(messages []Message, tools []Tool, onChunk func(strin
 }
 
 // StreamChatWithChannel 执行流式聊天请求并返回通道
-func (c *Client) StreamChatWithChannel(messages []Message, tools []Tool) (<-chan string, <-chan string, <-chan []ToolCall, <-chan error) {
-	chunkCh := make(chan string)
-	reasoningCh := make(chan string)
-	toolCallCh := make(chan []ToolCall)
+func (c *Client) StreamChatWithChannel(ctx context.Context, messages []Message, tools []Tool) (<-chan string, <-chan string, <-chan []ToolCall, <-chan error) {
+	chunkCh := make(chan string, 10)  // 添加缓冲区，提高吞吐量
+	reasoningCh := make(chan string, 10)
+	toolCallCh := make(chan []ToolCall, 5)
 	errCh := make(chan error, 1)
 
 	go func() {
-		defer close(chunkCh)
-		defer close(reasoningCh)
-		defer close(toolCallCh)
-		defer close(errCh)
+		// 确保所有channel在goroutine退出时关闭
+		defer func() {
+			close(chunkCh)
+			close(reasoningCh)
+			close(toolCallCh)
+			close(errCh)
+		}()
 
+		// 创建可取消的子context，关联到StreamChat调用
+		streamCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		// 使用channel监听context取消信号
+		done := make(chan struct{})
+		go func() {
+			<-streamCtx.Done()
+			close(done)
+		}()
+
+		// 执行流式请求
 		err := c.StreamChat(messages, tools, func(content, reasoning string, toolCalls []ToolCall) {
-			if content != "" {
-				chunkCh <- content
-			}
-			if reasoning != "" {
-				reasoningCh <- reasoning
-			}
-			if len(toolCalls) > 0 {
-				toolCallCh <- toolCalls
+			select {
+			case <-done:
+				// context已取消，停止发送
+				return
+			default:
+				// 发送数据到channel，带超时避免阻塞
+				if content != "" {
+					select {
+					case chunkCh <- content:
+					case <-time.After(100 * time.Millisecond):
+						// 发送超时，跳过
+					}
+				}
+				if reasoning != "" {
+					select {
+					case reasoningCh <- reasoning:
+					case <-time.After(100 * time.Millisecond):
+						// 发送超时，跳过
+					}
+				}
+				if len(toolCalls) > 0 {
+					select {
+					case toolCallCh <- toolCalls:
+					case <-time.After(100 * time.Millisecond):
+						// 发送超时，跳过
+					}
+				}
 			}
 		})
 
 		if err != nil {
-			errCh <- err
+			select {
+			case errCh <- err:
+			case <-done:
+				// context已取消
+			}
 		} else {
 			// 流正常结束时发送空字符串表示结束
-			chunkCh <- ""
+			select {
+			case chunkCh <- "":
+			case <-done:
+				// context已取消
+			}
 		}
 	}()
 

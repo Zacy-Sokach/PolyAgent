@@ -35,10 +35,9 @@ func addSystemPromptIfNeeded(messages []api.Message) []api.Message {
 			return append([]api.Message{systemMessage}, messages...)
 		}
 
-		// 创建工具管理器获取可用工具
-		toolManager := NewToolManager()
-		tools := toolManager.GetToolsForAPI()
-
+			// 创建工具管理器获取可用工具
+			toolManager := NewToolManager(nil) // 使用默认配置
+			tools := toolManager.GetToolsForAPI()
 		// 生成动态系统提示
 		systemPrompt := promptGenerator.GenerateSystemPrompt(tools, agentMDContent)
 		systemMessage := api.TextMessage("system", systemPrompt)

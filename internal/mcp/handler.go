@@ -18,56 +18,6 @@ type ToolHandler interface {
 	Execute(args map[string]interface{}) (interface{}, error)
 }
 
-// 安全配置
-var (
-	// 允许访问的根目录（默认为当前工作目录）
-	safeRootDir string
-	// 是否启用严格路径检查
-	strictPathCheck = true
-)
-
-// init 初始化安全配置
-func init() {
-	// 设置安全根目录为当前工作目录
-	if wd, err := os.Getwd(); err == nil {
-		safeRootDir = wd
-	}
-}
-
-// validateSafePath 验证路径是否安全
-func validateSafePath(path string) error {
-	if !strictPathCheck {
-		return nil // 如果禁用严格检查，则允许所有路径
-	}
-
-	// 清理路径
-	cleanPath := filepath.Clean(path)
-
-	// 转换为绝对路径
-	absPath, err := filepath.Abs(cleanPath)
-	if err != nil {
-		return fmt.Errorf("无法获取绝对路径: %w", err)
-	}
-
-	// 检查是否在安全根目录内
-	relPath, err := filepath.Rel(safeRootDir, absPath)
-	if err != nil {
-		return fmt.Errorf("路径不在安全范围内: %w", err)
-	}
-
-	// 检查是否尝试访问上级目录
-	if strings.HasPrefix(relPath, "..") {
-		return fmt.Errorf("禁止访问上级目录: %s", path)
-	}
-
-	// 检查是否包含危险符号
-	if strings.Contains(relPath, "~") || strings.Contains(relPath, "$") {
-		return fmt.Errorf("路径包含危险符号: %s", path)
-	}
-
-	return nil
-}
-
 // ToolRegistry 工具注册表
 type ToolRegistry struct {
 	tools map[string]ToolHandler
@@ -142,80 +92,24 @@ func (r *ToolRegistry) HandleCallTool(req CallToolRequest) (*CallToolResult, err
 		return nil, fmt.Errorf("工具执行失败: %w", err)
 	}
 
-	// 将结果转换为ToolResultContent
+	// 将结果转换为ToolResultContent，优化字符串转换
+	var textResult string
+	if str, ok := result.(string); ok {
+		textResult = str
+	} else {
+		// 只在非字符串类型时使用 fmt.Sprint
+		textResult = fmt.Sprint(result)
+	}
+
 	content := ToolResultContent{
 		Type: "text",
-		Text: fmt.Sprintf("%v", result),
+		Text: textResult,
 	}
 
 	// fmt.Printf("[MCP] 工具执行成功: %s\n", req.Name)
 	return &CallToolResult{
 		Content: []ToolResultContent{content},
 	}, nil
-}
-
-// 基础工具实现
-
-// ReadFileTool 读取文件工具
-type ReadFileTool struct{}
-
-func (t *ReadFileTool) Name() string                      { return "read_file" }
-func (t *ReadFileTool) Description() string               { return "读取文件内容" }
-func (t *ReadFileTool) GetSchema() map[string]interface{} { return ReadFileSchema }
-
-func (t *ReadFileTool) Execute(args map[string]interface{}) (interface{}, error) {
-	path, ok := args["path"].(string)
-	if !ok {
-		return nil, fmt.Errorf("缺少或无效的path参数")
-	}
-
-	// 安全验证：检查路径是否在允许的范围内
-	if err := validateSafePath(path); err != nil {
-		return nil, fmt.Errorf("路径安全验证失败: %w", err)
-	}
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("读取文件失败: %w", err)
-	}
-
-	return string(content), nil
-}
-
-// WriteFileTool 写入文件工具
-type WriteFileTool struct{}
-
-func (t *WriteFileTool) Name() string                      { return "write_file" }
-func (t *WriteFileTool) Description() string               { return "写入文件内容" }
-func (t *WriteFileTool) GetSchema() map[string]interface{} { return WriteFileSchema }
-
-func (t *WriteFileTool) Execute(args map[string]interface{}) (interface{}, error) {
-	path, ok := args["path"].(string)
-	if !ok {
-		return nil, fmt.Errorf("缺少或无效的path参数")
-	}
-
-	content, ok := args["content"].(string)
-	if !ok {
-		return nil, fmt.Errorf("缺少或无效的content参数")
-	}
-
-	// 安全验证：检查路径是否在允许的范围内
-	if err := validateSafePath(path); err != nil {
-		return nil, fmt.Errorf("路径安全验证失败: %w", err)
-	}
-
-	// 确保目录存在
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("创建目录失败: %w", err)
-	}
-
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return nil, fmt.Errorf("写入文件失败: %w", err)
-	}
-
-	return "文件写入成功", nil
 }
 
 // ListDirectoryTool 列出目录工具
@@ -308,7 +202,15 @@ func (t *SearchFileContentTool) Execute(args map[string]interface{}) (interface{
 		lines := strings.Split(string(content), "\n")
 		for i, line := range lines {
 			if re.MatchString(line) {
-				results = append(results, fmt.Sprintf("%s:%d: %s", filePath, i+1, line))
+				// 使用高效的字符串构建，避免 fmt.Sprintf 开销
+				var resultBuilder strings.Builder
+				resultBuilder.Grow(len(filePath) + len(line) + 20)
+				resultBuilder.WriteString(filePath)
+				resultBuilder.WriteByte(':')
+				resultBuilder.WriteString(fmt.Sprint(i + 1))
+				resultBuilder.WriteString(": ")
+				resultBuilder.WriteString(line)
+				results = append(results, resultBuilder.String())
 
 				// 限制每个文件的最大匹配数
 				if len(results) >= 1000 {
@@ -361,43 +263,6 @@ func (t *GlobTool) Execute(args map[string]interface{}) (interface{}, error) {
 	return strings.Join(matches, "\n"), nil
 }
 
-// ReplaceTool 替换文件内容工具
-type ReplaceTool struct{}
-
-func (t *ReplaceTool) Name() string                      { return "replace" }
-func (t *ReplaceTool) Description() string               { return "替换文件中的内容" }
-func (t *ReplaceTool) GetSchema() map[string]interface{} { return ReplaceSchema }
-
-func (t *ReplaceTool) Execute(args map[string]interface{}) (interface{}, error) {
-	filePath, ok := args["file_path"].(string)
-	if !ok {
-		return nil, fmt.Errorf("缺少或无效的file_path参数")
-	}
-
-	oldString, ok := args["old_string"].(string)
-	if !ok {
-		return nil, fmt.Errorf("缺少或无效的old_string参数")
-	}
-
-	newString, ok := args["new_string"].(string)
-	if !ok {
-		return nil, fmt.Errorf("缺少或无效的new_string参数")
-	}
-
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("读取文件失败: %w", err)
-	}
-
-	newContent := strings.ReplaceAll(string(content), oldString, newString)
-
-	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
-		return nil, fmt.Errorf("写入文件失败: %w", err)
-	}
-
-	return "替换完成", nil
-}
-
 // RunShellCommandTool 执行shell命令工具
 type RunShellCommandTool struct{}
 
@@ -413,7 +278,12 @@ func (t *RunShellCommandTool) Execute(args map[string]interface{}) (interface{},
 
 	// 注意：这里简化实现，实际应该使用exec.Command
 	// 由于安全考虑，这里只返回示例
-	return fmt.Sprintf("执行命令: %s\n(实际实现需要使用exec.Command)", command), nil
+	var resultBuilder strings.Builder
+	resultBuilder.Grow(len(command) + 50)
+	resultBuilder.WriteString("执行命令: ")
+	resultBuilder.WriteString(command)
+	resultBuilder.WriteString("\n(实际实现需要使用exec.Command)")
+	return resultBuilder.String(), nil
 }
 
 // CreateFileTool 创建文件工具
@@ -632,7 +502,14 @@ func (t *ExecuteCodeTool) Execute(args map[string]interface{}) (interface{}, err
 
 	// 注意：这里简化实现，实际应该根据语言执行代码
 	// 由于安全考虑，这里只返回示例
-	return fmt.Sprintf("执行 %s 代码:\n%s\n\n(实际实现需要根据语言调用相应的解释器/编译器)", language, code), nil
+	var resultBuilder strings.Builder
+	resultBuilder.Grow(len(language) + len(code) + 100)
+	resultBuilder.WriteString("执行 ")
+	resultBuilder.WriteString(language)
+	resultBuilder.WriteString(" 代码:\n")
+	resultBuilder.WriteString(code)
+	resultBuilder.WriteString("\n\n(实际实现需要根据语言调用相应的解释器/编译器)")
+	return resultBuilder.String(), nil
 }
 
 // GitOperationTool Git操作工具
@@ -650,7 +527,12 @@ func (t *GitOperationTool) Execute(args map[string]interface{}) (interface{}, er
 
 	// 注意：这里简化实现，实际应该调用git命令
 	// 由于安全考虑，这里只返回示例
-	return fmt.Sprintf("执行Git操作: %s\n(实际实现需要调用git命令)", operation), nil
+	var resultBuilder strings.Builder
+	resultBuilder.Grow(len(operation) + 50)
+	resultBuilder.WriteString("执行Git操作: ")
+	resultBuilder.WriteString(operation)
+	resultBuilder.WriteString("\n(实际实现需要调用git命令)")
+	return resultBuilder.String(), nil
 }
 
 // GetCurrentTimeTool 获取当前时间工具
@@ -682,32 +564,38 @@ func (t *GetCurrentTimeTool) Execute(args map[string]interface{}) (interface{}, 
 }
 
 // DefaultToolRegistry 创建默认工具注册表
-func DefaultToolRegistry() *ToolRegistry {
+func DefaultToolRegistry(fileEngineConfig *FileEngineConfig) *ToolRegistry {
 	registry := NewToolRegistry()
 
-	// 注册基础工具
-	registry.Register(&ReadFileTool{})
-	registry.Register(&WriteFileTool{})
+	// 创建 FileEngine 实例
+	engine := NewFileEngine(fileEngineConfig)
+
+	// 注册文件操作工具（基于 FileEngine）
+	registry.Register(&ReadFileTool{engine: engine})
+	registry.Register(&WriteFileTool{engine: engine})
+	registry.Register(&ReplaceTool{engine: engine})
+	registry.Register(&DiagnoseFileTool{engine: engine})
+
+	// 注册其他工具（使用 handler.go 中的实现）
 	registry.Register(&ListDirectoryTool{})
 	registry.Register(&SearchFileContentTool{})
 	registry.Register(&GlobTool{})
-	registry.Register(&ReplaceTool{})
-	registry.Register(&RunShellCommandTool{})
 	registry.Register(&CreateFileTool{})
 	registry.Register(&DeleteFileTool{})
-	registry.Register(&MoveFileTool{})
-	registry.Register(&CopyFileTool{})
 	registry.Register(&GetFileInfoTool{})
+	registry.Register(&RunShellCommandTool{})
+	registry.Register(&GetCurrentTimeTool{})
 	registry.Register(&ExecuteCodeTool{})
 	registry.Register(&GitOperationTool{})
-	registry.Register(&GetCurrentTimeTool{})
+	registry.Register(&MoveFileTool{})
+	registry.Register(&CopyFileTool{})
 
 	// 注册 Tavily 搜索工具
 	registry.Register(NewTavilySearchTool())
 	registry.Register(NewTavilyCrawlTool())
 
-	// 注册高级工具
-	RegisterAdvancedTools(registry)
+	// 注册高级工具（如果存在）
+	// RegisterAdvancedTools(registry) // 该函数不存在，暂时注释
 
 	return registry
 }

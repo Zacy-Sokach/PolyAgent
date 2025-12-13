@@ -3,10 +3,75 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // MCP协议版本
 const ProtocolVersion = "2024-11-05"
+
+// 错误码定义
+const (
+	CodeParseError     = -32700
+	CodeInvalidRequest = -32600
+	CodeMethodNotFound = -32601
+	CodeInvalidParams  = -32602
+	CodeInternalError  = -32603
+	CodeToolError      = -32000
+	
+	// FileEngine 相关错误码
+	CodePathNotAllowed = -32001
+	CodeFileTooLarge   = -32002
+	CodeFileNotFound   = -32003
+	CodeBackupFailed   = -32004
+	CodeCacheError     = -32005
+	CodeReadError      = -32006
+	CodeWriteError     = -32007
+)
+
+// ConvertToMCPError 将错误转换为 MCP 错误格式
+func ConvertToMCPError(err error) *JSONRPCError {
+	if err == nil {
+		return nil
+	}
+	
+	code := CodeInternalError
+	data := map[string]interface{}{
+		"original_error": err.Error(),
+	}
+	
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "outside allowed roots"):
+		code = CodePathNotAllowed
+		data["suggestion"] = "Check that the path is within your project directory"
+		
+	case strings.Contains(errStr, "file too large"):
+		code = CodeFileTooLarge
+		data["max_size_mb"] = 10
+		data["suggestion"] = "Try reading a portion of the file using offset and limit"
+		
+	case strings.Contains(errStr, "no such file") || strings.Contains(errStr, "file does not exist"):
+		code = CodeFileNotFound
+		data["suggestion"] = "Verify the file path exists"
+		
+	case strings.Contains(errStr, "backup failed"):
+		code = CodeBackupFailed
+		data["suggestion"] = "Check disk space and backup directory permissions"
+		
+	case strings.Contains(errStr, "permission denied"):
+		data["suggestion"] = "Check file permissions"
+		
+	case strings.Contains(errStr, "file type not allowed"):
+		code = CodePathNotAllowed
+		data["suggestion"] = "The file extension is blacklisted for security reasons"
+	}
+	
+	return &JSONRPCError{
+		Code:    code,
+		Message: err.Error(),
+		Data:    data,
+	}
+}
 
 // JSON-RPC消息类型
 type JSONRPCRequest struct {
@@ -27,6 +92,11 @@ type JSONRPCError struct {
 	Code    int         `json:"code"`
 	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
+}
+
+// Error 实现 error 接口
+func (e *JSONRPCError) Error() string {
+	return fmt.Sprintf("MCP Error %d: %s", e.Code, e.Message)
 }
 
 // MCP特定消息类型
@@ -195,11 +265,16 @@ var (
 			},
 			"old_string": map[string]interface{}{
 				"type":        "string",
-				"description": "要替换的旧字符串",
+				"description": "要替换的旧字符串或正则表达式模式",
 			},
 			"new_string": map[string]interface{}{
 				"type":        "string",
 				"description": "替换后的新字符串",
+			},
+			"use_regex": map[string]interface{}{
+				"type":        "boolean",
+				"description": "是否使用正则表达式进行替换",
+				"default":     false,
 			},
 			"expected_replacements": map[string]interface{}{
 				"type":        "integer",
@@ -368,15 +443,6 @@ var (
 )
 
 // 错误码定义
-const (
-	CodeParseError     = -32700
-	CodeInvalidRequest = -32600
-	CodeMethodNotFound = -32601
-	CodeInvalidParams  = -32602
-	CodeInternalError  = -32603
-	CodeToolError      = -32000
-)
-
 // 创建错误响应
 func NewError(code int, message string, data interface{}) *JSONRPCError {
 	return &JSONRPCError{

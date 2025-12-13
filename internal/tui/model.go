@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -55,9 +56,11 @@ type Model struct {
 	maxMessages      int // 最大消息数量限制
 	renderedLines    []string // 缓存已渲染的行，避免重复渲染
 	lastRenderedHash uint64   // 上次渲染的内容哈希，用于检测变化
+	ctx              context.Context // 用于取消操作的context
+	cancel           context.CancelFunc // 取消函数
 }
 
-func InitialModel(apiKey string) Model {
+func InitialModel(apiKey string, toolManager *ToolManager) Model {
 	ta := textarea.New()
 	ta.Placeholder = "输入你的问题..."
 	ta.Focus()
@@ -83,8 +86,13 @@ func InitialModel(apiKey string) Model {
 		}
 	}()
 
-	toolManager := NewToolManager()
+	if toolManager == nil {
+		toolManager = NewToolManager()
+	}
 	commandParser := NewCommandParser()
+
+	// 创建context用于取消操作
+	ctx, cancel := context.WithCancel(context.Background())
 
 	return Model{
 		textarea:         ta,
@@ -98,6 +106,8 @@ func InitialModel(apiKey string) Model {
 		toolManager:      toolManager,
 		commandParser:    commandParser,
 		maxMessages:      50,  // 限制最多显示50条消息
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 }
 
@@ -145,13 +155,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.editor != nil {
 				return m, m.saveChangesToDisk()
 			}
-		case tea.KeyCtrlR:
-			if m.editor != nil {
-				return m, m.rollbackSession()
-			}
 		case tea.KeyEsc:
 			if m.thinking {
 				m.thinking = false
+				// 取消正在进行的操作
+				if m.cancel != nil {
+					m.cancel()
+				}
+				// 重新创建context以便下次使用
+				m.ctx, m.cancel = context.WithCancel(context.Background())
 			}
 		}
 
@@ -314,20 +326,6 @@ func (m Model) saveChangesToDisk() tea.Cmd {
 	}
 }
 
-func (m Model) rollbackSession() tea.Cmd {
-	return func() tea.Msg {
-		if m.editor == nil {
-			return ResponseMsg{Content: "编辑系统未初始化"}
-		}
-
-		if err := m.editor.RollbackSession(); err != nil {
-			return ResponseMsg{Content: "回退失败: " + err.Error()}
-		}
-
-		return ResponseMsg{Content: "已回退当前会话的所有修改"}
-	}
-}
-
 func (m Model) View() string {
 	if !m.ready {
 		return "初始化中..."
@@ -348,16 +346,23 @@ func (m *Model) updateViewport() tea.Cmd {
 }
 
 func (m Model) formatMessages() string {
+	messageCount := len(m.messages)
+	if messageCount == 0 {
+		return ""
+	}
+	
+	// 预分配字符串构建器容量，避免多次扩容（初始估算每条消息平均200字符）
 	var sb strings.Builder
+	sb.Grow(messageCount * 200)
 	
 	// 限制显示的消息数量，只显示最近的消息
 	// 保留最近10条用户消息和对应的AI回复，以及所有系统消息
-	maxUserMessages := 10
+	const maxUserMessages = 10
 	userMessageCount := 0
 	
-	// 计算需要显示的消息起始位置
+	// 计算需要显示的消息起始位置（从后向前遍历更高效）
 	startIndex := 0
-	for i := len(m.messages) - 1; i >= 0; i-- {
+	for i := messageCount - 1; i >= 0; i-- {
 		if m.messages[i].Role == "user" {
 			userMessageCount++
 			if userMessageCount > maxUserMessages {
@@ -371,11 +376,14 @@ func (m Model) formatMessages() string {
 	if startIndex > 0 {
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
 			fmt.Sprintf("... (显示最近 %d 条对话，共 %d 条) ...\n\n", 
-				len(m.messages)-startIndex, len(m.messages))))
+				messageCount-startIndex, messageCount)))
 	}
 	
+	// 获取 Markdown 渲染器单例，避免重复创建
+	mdRenderer := GetMarkdownRenderer()
+	
 	// 渲染从startIndex开始的消息
-	for i := startIndex; i < len(m.messages); i++ {
+	for i := startIndex; i < messageCount; i++ {
 		msg := m.messages[i]
 		switch msg.Role {
 		case "user":
@@ -384,24 +392,22 @@ func (m Model) formatMessages() string {
 			sb.WriteString("\n\n")
 		case "assistant":
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("AI: "))
-			// 对 AI 消息进行 markdown 解析和颜色渲染
-			content := msg.Content
-			renderedContent := RenderMarkdownToANSI(content)
+			// 使用单例渲染器，避免重复初始化
+			renderedContent := mdRenderer.Render(msg.Content)
 			sb.WriteString(renderedContent)
 			sb.WriteString("\n\n")
 		case "system":
 			// 只显示工具调用、工具结果和错误消息，不显示长的系统提示
-			// 系统提示通常很长（>100字符），我们只显示短的系统消息
-			if len(msg.Content) < 100 ||
-				strings.Contains(msg.Content, "🔧") ||
-				strings.Contains(msg.Content, "✅") ||
-				strings.Contains(msg.Content, "❌") ||
-				strings.Contains(msg.Content, "工具执行") ||
-				strings.Contains(msg.Content, "AI 请求使用工具") {
+			content := msg.Content
+			if len(content) < 100 ||
+				strings.Contains(content, "🔧") ||
+				strings.Contains(content, "✅") ||
+				strings.Contains(content, "❌") ||
+				strings.Contains(content, "工具执行") ||
+				strings.Contains(content, "AI 请求使用工具") {
 				sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
-				// 对系统消息也进行 markdown 解析
-				content := msg.Content
-				renderedContent := RenderMarkdownToANSI(content)
+				// 使用单例渲染器
+				renderedContent := mdRenderer.Render(content)
 				sb.WriteString(renderedContent)
 				sb.WriteString("\n\n")
 			}
@@ -412,22 +418,37 @@ func (m Model) formatMessages() string {
 
 // formatMessagesWithoutLastAssistant 格式化消息但不包含最后一条AI消息（用于流式渲染）
 func (m Model) formatMessagesWithoutLastAssistant() string {
-	var sb strings.Builder
-	
-	// 如果没有消息，返回空
-	if len(m.messages) == 0 {
+	messageCount := len(m.messages)
+	if messageCount == 0 {
 		return ""
 	}
 	
+	// 如果最后一条是AI消息，则不渲染它
+	endIndex := messageCount
+	if m.messages[endIndex-1].Role == "assistant" {
+		endIndex--
+	}
+	
+	// 如果没有消息需要渲染，返回空
+	if endIndex == 0 {
+		return ""
+	}
+	
+	// 复用 formatMessages 的逻辑，避免代码重复
+	// 创建一个临时消息切片，排除最后一条AI消息
+	tempMessages := m.messages[:endIndex]
+	
+	var sb strings.Builder
+	sb.Grow(endIndex * 200)
+	
 	// 限制显示的消息数量，只显示最近的消息
-	// 保留最近10条用户消息和对应的AI回复，以及所有系统消息
-	maxUserMessages := 10
+	const maxUserMessages = 10
 	userMessageCount := 0
 	
 	// 计算需要显示的消息起始位置
 	startIndex := 0
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].Role == "user" {
+	for i := endIndex - 1; i >= 0; i-- {
+		if tempMessages[i].Role == "user" {
 			userMessageCount++
 			if userMessageCount > maxUserMessages {
 				startIndex = i + 1
@@ -440,18 +461,15 @@ func (m Model) formatMessagesWithoutLastAssistant() string {
 	if startIndex > 0 {
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
 			fmt.Sprintf("... (显示最近 %d 条对话，共 %d 条) ...\n\n", 
-				len(m.messages)-startIndex, len(m.messages))))
+				endIndex-startIndex, messageCount)))
 	}
 	
-	// 渲染从startIndex开始的消息，但不包含最后一条AI消息
-	endIndex := len(m.messages)
-	// 如果最后一条是AI消息，则不渲染它
-	if endIndex > 0 && m.messages[endIndex-1].Role == "assistant" {
-		endIndex--
-	}
+	// 获取 Markdown 渲染器单例
+	mdRenderer := GetMarkdownRenderer()
 	
+	// 渲染从startIndex开始的消息
 	for i := startIndex; i < endIndex; i++ {
-		msg := m.messages[i]
+		msg := tempMessages[i]
 		switch msg.Role {
 		case "user":
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("你: "))
@@ -459,24 +477,19 @@ func (m Model) formatMessagesWithoutLastAssistant() string {
 			sb.WriteString("\n\n")
 		case "assistant":
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("AI: "))
-			// 对 AI 消息进行 markdown 解析和颜色渲染
-			content := msg.Content
-			renderedContent := RenderMarkdownToANSI(content)
+			renderedContent := mdRenderer.Render(msg.Content)
 			sb.WriteString(renderedContent)
 			sb.WriteString("\n\n")
 		case "system":
-			// 只显示工具调用、工具结果和错误消息，不显示长的系统提示
-			// 系统提示通常很长（>100字符），我们只显示短的系统消息
-			if len(msg.Content) < 100 ||
-				strings.Contains(msg.Content, "🔧") ||
-				strings.Contains(msg.Content, "✅") ||
-				strings.Contains(msg.Content, "❌") ||
-				strings.Contains(msg.Content, "工具执行") ||
-				strings.Contains(msg.Content, "AI 请求使用工具") {
+			content := msg.Content
+			if len(content) < 100 ||
+				strings.Contains(content, "🔧") ||
+				strings.Contains(content, "✅") ||
+				strings.Contains(content, "❌") ||
+				strings.Contains(content, "工具执行") ||
+				strings.Contains(content, "AI 请求使用工具") {
 				sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
-				// 对系统消息也进行 markdown 解析
-				content := msg.Content
-				renderedContent := RenderMarkdownToANSI(content)
+				renderedContent := mdRenderer.Render(content)
 				sb.WriteString(renderedContent)
 				sb.WriteString("\n\n")
 			}
@@ -489,8 +502,9 @@ func (m Model) formatMessagesWithoutLastAssistant() string {
 
 // renderOptimizedViewport 优化的视口渲染，只渲染新增内容（增量更新）
 func (m *Model) renderOptimizedViewport() {
-	// 使用缓存的历史消息渲染结果，避免重复渲染
+	// 预分配容量，避免多次扩容（估算：历史消息 + 当前响应 + 思考内容）
 	var displayContent strings.Builder
+	displayContent.Grow(4096)
 	
 	// 只在首次或消息完成时渲染历史消息
 	if m.renderedLines == nil || len(m.messages) == 0 {
@@ -502,6 +516,9 @@ func (m *Model) renderOptimizedViewport() {
 			displayContent.WriteString("\n")
 		}
 	}
+	
+	// 获取 Markdown 渲染器单例
+	mdRenderer := GetMarkdownRenderer()
 	
 	// 添加思考内容（增量更新）
 	if m.currentThink != "" {
@@ -539,7 +556,8 @@ func (m *Model) renderOptimizedViewport() {
 		}
 		
 		if shouldParseMarkdown {
-			renderedResp := RenderMarkdownToANSI(m.currentResp)
+			// 使用单例渲染器
+			renderedResp := mdRenderer.Render(m.currentResp)
 			displayContent.WriteString(renderedResp)
 		} else {
 			// 直接显示原始文本，减少CPU开销
@@ -555,20 +573,33 @@ func (m *Model) renderOptimizedViewport() {
 
 // updateRenderedLinesCache 更新历史消息的渲染缓存
 func (m *Model) updateRenderedLinesCache() {
-	if len(m.messages) == 0 {
+	messageCount := len(m.messages)
+	if messageCount == 0 {
 		m.renderedLines = nil
 		return
 	}
 	
 	// 只缓存最近的消息（避免内存占用过大）
-	maxCacheMessages := 20
+	const maxCacheMessages = 20
 	startIndex := 0
-	if len(m.messages) > maxCacheMessages {
-		startIndex = len(m.messages) - maxCacheMessages
+	if messageCount > maxCacheMessages {
+		startIndex = messageCount - maxCacheMessages
 	}
 	
+	// 预分配容量
 	var sb strings.Builder
-	for i := startIndex; i < len(m.messages)-1; i++ { // -1 排除最后一条（正在输入的）
+	sb.Grow(maxCacheMessages * 200)
+	
+	// 获取 Markdown 渲染器单例
+	mdRenderer := GetMarkdownRenderer()
+	
+	// 渲染消息到缓存（排除最后一条正在输入的）
+	endIndex := messageCount
+	if endIndex > 0 && m.messages[endIndex-1].Role == "assistant" && m.thinking {
+		endIndex-- // 流式响应时，最后一条AI消息还未完成
+	}
+	
+	for i := startIndex; i < endIndex; i++ {
 		msg := m.messages[i]
 		switch msg.Role {
 		case "user":
@@ -577,18 +608,19 @@ func (m *Model) updateRenderedLinesCache() {
 			sb.WriteString("\n\n")
 		case "assistant":
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("AI: "))
-			renderedContent := RenderMarkdownToANSI(msg.Content)
+			renderedContent := mdRenderer.Render(msg.Content)
 			sb.WriteString(renderedContent)
 			sb.WriteString("\n\n")
 		case "system":
-			if len(msg.Content) < 100 ||
-				strings.Contains(msg.Content, "🔧") ||
-				strings.Contains(msg.Content, "✅") ||
-				strings.Contains(msg.Content, "❌") ||
-				strings.Contains(msg.Content, "工具执行") ||
-				strings.Contains(msg.Content, "AI 请求使用工具") {
+			content := msg.Content
+			if len(content) < 100 ||
+				strings.Contains(content, "🔧") ||
+				strings.Contains(content, "✅") ||
+				strings.Contains(content, "❌") ||
+				strings.Contains(content, "工具执行") ||
+				strings.Contains(content, "AI 请求使用工具") {
 				sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
-				renderedContent := RenderMarkdownToANSI(msg.Content)
+				renderedContent := mdRenderer.Render(content)
 				sb.WriteString(renderedContent)
 				sb.WriteString("\n\n")
 			}
@@ -598,6 +630,7 @@ func (m *Model) updateRenderedLinesCache() {
 	// 将渲染结果按行缓存
 	content := sb.String()
 	if content != "" {
+		// 使用高效的字符串分割
 		m.renderedLines = strings.Split(strings.TrimRight(content, "\n"), "\n")
 	} else {
 		m.renderedLines = nil
@@ -605,7 +638,7 @@ func (m *Model) updateRenderedLinesCache() {
 }
 
 func (m Model) helpView() string {
-	help := "Enter: 发送消息 • Ctrl+S: 保存修改 • Ctrl+R: 回退会话 • Esc: 取消思考 • Ctrl+C: 退出"
+	help := "Enter: 发送消息 • Ctrl+S: 保存修改 • Esc: 取消思考 • Ctrl+C: 退出"
 	if m.thinking {
 		help = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("AI正在思考中... ") + "Esc: 取消"
 	}
@@ -636,7 +669,7 @@ func (m *Model) startStream(input string) tea.Cmd {
 	}
 
 	// 启动流式请求
-	m.streamCh, m.reasoningCh, m.toolCallCh, m.streamErrCh = client.StreamChatWithChannel(finalMessages, tools)
+	m.streamCh, m.reasoningCh, m.toolCallCh, m.streamErrCh = client.StreamChatWithChannel(m.ctx, finalMessages, tools)
 
 	return func() tea.Msg {
 		select {
@@ -725,7 +758,7 @@ func (m *Model) continueStream() tea.Cmd {
 	tools := m.toolManager.GetToolsForAPI()
 
 	// 启动流式请求（使用当前的API历史）
-	m.streamCh, m.reasoningCh, m.toolCallCh, m.streamErrCh = client.StreamChatWithChannel(m.apiMessages, tools)
+	m.streamCh, m.reasoningCh, m.toolCallCh, m.streamErrCh = client.StreamChatWithChannel(m.ctx, m.apiMessages, tools)
 
 	return func() tea.Msg {
 		select {
@@ -799,7 +832,7 @@ AGENT.md 应该包含：
 		finalMessages = addSystemPromptIfNeeded(m.apiMessages)
 	}
 
-	m.streamCh, m.reasoningCh, m.toolCallCh, m.streamErrCh = client.StreamChatWithChannel(finalMessages, tools)
+	m.streamCh, m.reasoningCh, m.toolCallCh, m.streamErrCh = client.StreamChatWithChannel(m.ctx, finalMessages, tools)
 
 	return func() tea.Msg {
 		select {
