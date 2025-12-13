@@ -86,7 +86,9 @@ go run ./cmd/polyagent
 **首次运行流程**：
 1. 程序会检测是否配置了 GLM-4.5 API Key
 2. 如果未配置，会提示用户输入 API Key
-3. 配置保存在 `~/.config/polyagent/config.yaml`
+3. 配置保存在跨平台配置目录：
+   - **Windows**: `%APPDATA%\polyagent\config.yaml`
+   - **Linux/macOS**: `~/.config/polyagent/config.yaml`
 4. 进入 TUI 交互界面
 
 ## 功能特性
@@ -122,14 +124,18 @@ go run ./cmd/polyagent
 - 安全的路径验证和权限控制
 
 ### 7. 历史会话管理
-- 自动保存对话历史到 `~/.config/polyagent/history.json`
+- 自动保存对话历史到跨平台配置目录：
+  - **Windows**: `%APPDATA%\polyagent\history.json`
+  - **Linux/macOS**: `~/.config/polyagent/history.json`
 - 支持历史记录查看（需实现）
 - 退出时自动保存
 
 ### 8. 安全的配置管理
 - API Key 加密存储
 - 配置文件使用 YAML 格式
-- 配置路径：`~/.config/polyagent/config.yaml`
+- 配置路径：
+  - **Windows**: `%APPDATA%\polyagent\config.yaml`
+  - **Linux/macOS**: `~/.config/polyagent/config.yaml`
 
 ## TUI 交互快捷键
 
@@ -154,7 +160,9 @@ go run ./cmd/polyagent
 
 ### 配置管理
 - 配置文件使用 YAML 格式
-- 配置路径：`~/.config/polyagent/`
+- 配置路径：
+  - **Windows**: `%APPDATA%\polyagent\`
+  - **Linux/macOS**: `~/.config/polyagent/`}
 - 支持默认配置和用户自定义配置
 
 ## API 集成
@@ -215,7 +223,9 @@ go run ./cmd/polyagent
 ### 常见问题
 
 1. **API Key 错误**
-   - 检查 `~/.config/polyagent/config.yaml` 文件
+   - 检查配置文件：
+  - **Windows**: `%APPDATA%\polyagent\config.yaml`
+  - **Linux/macOS**: `~/.config/polyagent/config.yaml`
    - 确认 API Key 有效且未过期
    - 重新运行程序输入新的 API Key
 
@@ -231,8 +241,12 @@ go run ./cmd/polyagent
 
 ### 调试模式
 目前没有内置调试模式，可以通过查看日志文件：
-- 配置日志：`~/.config/polyagent/config.yaml`
-- 历史日志：`~/.config/polyagent/history.json`
+- 配置日志：
+  - **Windows**: `%APPDATA%\polyagent\config.yaml`
+  - **Linux/macOS**: `~/.config/polyagent/config.yaml`
+- 历史日志：
+  - **Windows**: `%APPDATA%\polyagent\history.json`
+  - **Linux/macOS**: `~/.config/polyagent/history.json`
 
 ## 贡献指南
 

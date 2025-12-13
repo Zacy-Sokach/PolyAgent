@@ -119,7 +119,9 @@ PolyAgent/
   - YAML 格式配置文件
   - API Key 安全存储
   - 默认配置管理
-  - 配置路径：`~/.config/polyagent/config.yaml`
+  - 配置路径：
+  - **Windows**: `%APPDATA%\polyagent\config.yaml`
+  - **Linux/macOS**: `~/.config/polyagent/config.yaml`
 
 #### 3. MCP 模块 (`internal/mcp/`)
 - **handler.go**: 工具处理器
@@ -267,7 +269,9 @@ go run ./cmd/polyagent
 1. **API Key 配置**: 程序会检测是否配置了 GLM-4.5 API Key
 2. **输入 API Key**: 如果未配置，会提示用户输入 API Key
 3. **Tavily API Key**: 可选配置，用于网络搜索功能
-4. **配置保存**: 配置保存在 `~/.config/polyagent/config.yaml`
+4. **配置保存**: 配置保存在跨平台配置目录：
+   - **Windows**: `%APPDATA%\polyagent\config.yaml`
+   - **Linux/macOS**: `~/.config/polyagent/config.yaml`
 
 ### 配置文件格式
 ```yaml
@@ -386,7 +390,9 @@ upx --best polyagent
 ### 安全注意事项
 
 #### 1. API Key 安全
-- **存储位置**: API Key 存储在 `~/.config/polyagent/config.yaml`
+- **存储位置**: API Key 存储在跨平台配置目录：
+  - **Windows**: `%APPDATA%\polyagent\config.yaml`
+  - **Linux/macOS**: `~/.config/polyagent/config.yaml`
 - **权限设置**: 确保配置文件权限正确 (600)
 - **不分享**: 不要将 API Key 提交到版本控制系统
 - **定期更换**: 建议定期更换 API Key

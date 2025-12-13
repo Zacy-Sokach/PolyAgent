@@ -54,11 +54,11 @@ func NewEditor() *Editor {
 
 // getSessionEditsPath 获取会话编辑历史文件路径
 func getSessionEditsPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
+	configDir, err := GetConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("获取用户主目录失败: %w", err)
+		return "", fmt.Errorf("获取配置目录失败: %w", err)
 	}
-	return filepath.Join(homeDir, ".config", "polyagent", "session_edits.json"), nil
+	return filepath.Join(configDir, "session_edits.json"), nil
 }
 
 // saveSessionEdits 保存会话编辑历史到磁盘

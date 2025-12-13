@@ -85,9 +85,9 @@ func LoadHistory() ([]HistoryEntry, error) {
 }
 
 func getHistoryPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
+	configDir, err := GetConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("获取用户主目录失败: %w", err)
+		return "", fmt.Errorf("获取配置目录失败: %w", err)
 	}
-	return filepath.Join(homeDir, ".config", "polyagent", "history.json"), nil
+	return filepath.Join(configDir, "history.json"), nil
 }

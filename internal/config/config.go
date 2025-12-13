@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Zacy-Sokach/PolyAgent/internal/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -114,9 +115,9 @@ func SaveTavilyAPIKey(key string) error {
 }
 
 func getConfigPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
+	configDir, err := utils.GetConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("获取用户主目录失败: %w", err)
+		return "", fmt.Errorf("获取配置目录失败: %w", err)
 	}
-	return filepath.Join(homeDir, ".config", "polyagent", "config.yaml"), nil
+	return filepath.Join(configDir, "config.yaml"), nil
 }

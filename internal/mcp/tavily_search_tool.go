@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Zacy-Sokach/PolyAgent/internal/config"
+	"github.com/Zacy-Sokach/PolyAgent/internal/utils"
 )
 
 const (
@@ -205,7 +206,7 @@ func (t *TavilySearchTool) getAPIKeyPrompt() string {
    tavily_api_key: "tvly-xxxxxx"
    ` + "```" + `
    
-   配置文件位置：` + "`~/.config/polyagent/config.yaml`" + `
+   配置文件位置：` + "`" + utils.GetConfigPathForDisplay() + "`" + `
 
 配置完成后，请重新运行搜索。`
 }
