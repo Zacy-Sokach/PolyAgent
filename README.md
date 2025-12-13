@@ -13,6 +13,31 @@
 
 ## 安装
 
+### 快速安装（推荐）
+
+#### Linux 和 macOS
+
+```bash
+# 使用安装脚本（自动检测最新版本并安装）
+curl -fsSL https://raw.githubusercontent.com/Zacy-Sokach/PolyAgent/main/scripts/install.sh | bash
+
+# 或者手动下载安装
+wget https://github.com/Zacy-Sokach/PolyAgent/releases/latest/download/polyagent-linux-amd64  # 或 darwin-amd64
+chmod +x polyagent-*
+sudo mv polyagent-* /usr/local/bin/polyagent
+```
+
+#### Windows
+
+```powershell
+# 使用 PowerShell 安装脚本（自动检测最新版本并安装）
+irm https://raw.githubusercontent.com/Zacy-Sokach/PolyAgent/main/scripts/install.ps1 | iex
+
+# 或者手动下载安装
+# 从 GitHub Releases 下载 polyagent-windows-amd64.exe
+# 添加到系统 PATH 或直接使用
+```
+
 ### 从源码编译
 
 ```bash
@@ -51,7 +76,9 @@ go run ./cmd/polyagent
 
 ## 配置
 
-配置文件位于：`~/.config/polyagent/config.yaml`
+配置文件位置：
+- **Windows**: `%APPDATA%\polyagent\config.yaml` (例如: `C:\Users\用户名\AppData\Roaming\polyagent\config.yaml`)
+- **Linux/macOS**: `~/.config/polyagent/config.yaml`
 
 ```yaml
 api_key: your_glm_api_key
