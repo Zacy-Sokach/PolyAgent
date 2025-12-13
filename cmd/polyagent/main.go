@@ -12,7 +12,33 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var (
+	Version = "dev"
+)
+
 func main() {
+	// 处理命令行参数
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-v", "--version":
+			fmt.Printf("PolyAgent %s\n", Version)
+			os.Exit(0)
+		case "-h", "--help":
+			fmt.Println("PolyAgent - Vibe Coding Tool")
+			fmt.Println()
+			fmt.Println("Usage:")
+			fmt.Println("  polyagent              Start the interactive TUI")
+			fmt.Println("  polyagent -v, --version  Show version information")
+			fmt.Println("  polyagent -h, --help     Show help information")
+			fmt.Println()
+			fmt.Println("Commands in TUI:")
+			fmt.Println("  check update           Check for updates")
+			fmt.Println("  update                 Update PolyAgent to latest version")
+			fmt.Println("  /init                  Initialize project documentation")
+			os.Exit(0)
+		}
+	}
+	
 	// 添加panic恢复
 	defer func() {
 		if r := recover(); r != nil {
@@ -82,6 +108,10 @@ func main() {
 			BackupDir:       cfg.FileEngine.BackupDir,
 		}
 		toolManager := tui.NewToolManager(&fileEngineConfig)
+		
+		// 设置版本号
+		tui.Version = Version
+		
 		p := tea.NewProgram(tui.InitialModel(cfg.APIKey, toolManager), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("程序运行错误: %v\n", err)

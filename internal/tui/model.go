@@ -7,12 +7,16 @@ import (
 	"time"
 
 	"github.com/Zacy-Sokach/PolyAgent/internal/api"
+	"github.com/Zacy-Sokach/PolyAgent/internal/update"
 	"github.com/Zacy-Sokach/PolyAgent/internal/utils"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// Version 是当前的 PolyAgent 版本，由 main 包设置
+var Version string
 
 type Message struct {
 	Role    string
@@ -783,6 +787,10 @@ func (m *Model) handleCommand(cmd *Command) tea.Cmd {
 	switch cmd.Type {
 	case CommandTypeInit:
 		return m.handleInitCommand()
+	case CommandTypeCheckUpdate:
+		return m.handleCheckUpdateCommand()
+	case CommandTypeUpdate:
+		return m.handleUpdateCommand()
 	default:
 		// 对于其他命令，显示不支持的消息
 		return func() tea.Msg {
@@ -848,6 +856,54 @@ AGENT.md 应该包含：
 			return ToolCallMsg{ToolCalls: toolCalls}
 		case err := <-m.streamErrCh:
 			return StreamErrorMsg{Error: err}
+		}
+	}
+}
+
+// handleCheckUpdateCommand 处理检查更新命令
+func (m *Model) handleCheckUpdateCommand() tea.Cmd {
+	return func() tea.Msg {
+		checker := update.NewChecker()
+		
+		latestVersion, err := checker.GetLatestVersion()
+		if err != nil {
+			return ResponseMsg{
+				Content: fmt.Sprintf("检查更新失败: %v", err),
+			}
+		}
+		
+		hasUpdate, _, err := checker.CheckForUpdate(Version)
+		if err != nil {
+			return ResponseMsg{
+				Content: fmt.Sprintf("检查更新失败: %v", err),
+			}
+		}
+		
+		if hasUpdate {
+			return ResponseMsg{
+				Content: fmt.Sprintf("发现新版本!\n当前版本: %s\n最新版本: %s\n\n输入 update 或 /update 开始更新", Version, latestVersion),
+			}
+		} else {
+			return ResponseMsg{
+				Content: fmt.Sprintf("当前已是最新版本 (%s)", Version),
+			}
+		}
+	}
+}
+
+// handleUpdateCommand 处理更新命令
+func (m *Model) handleUpdateCommand() tea.Cmd {
+	return func() tea.Msg {
+		updater := update.NewUpdater()
+		
+		if err := updater.Update(Version); err != nil {
+			return ResponseMsg{
+				Content: fmt.Sprintf("更新失败: %v", err),
+			}
+		}
+		
+		return ResponseMsg{
+			Content: fmt.Sprintf("更新成功! 请重启 PolyAgent 以使用新版本。"),
 		}
 	}
 }

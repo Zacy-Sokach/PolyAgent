@@ -15,27 +15,24 @@
 
 ### 快速安装（推荐）
 
+安装完成后，直接在终端输入 `polyagent` 即可运行。
+
 #### Linux 和 macOS
 
 ```bash
-# 使用安装脚本（自动检测最新版本并安装）
 curl -fsSL https://raw.githubusercontent.com/Zacy-Sokach/PolyAgent/main/scripts/install.sh | bash
 
-# 或者手动下载安装
-wget https://github.com/Zacy-Sokach/PolyAgent/releases/latest/download/polyagent-linux-amd64  # 或 darwin-amd64
-chmod +x polyagent-*
-sudo mv polyagent-* /usr/local/bin/polyagent
+# 安装完成后直接运行
+polyagent
 ```
 
 #### Windows
 
 ```powershell
-# 使用 PowerShell 安装脚本（自动检测最新版本并安装）
 irm https://raw.githubusercontent.com/Zacy-Sokach/PolyAgent/main/scripts/install.ps1 | iex
 
-# 或者手动下载安装
-# 从 GitHub Releases 下载 polyagent-windows-amd64.exe
-# 添加到系统 PATH 或直接使用
+# 安装完成后直接运行
+polyagent
 ```
 
 ### 从源码编译

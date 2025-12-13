@@ -21,25 +21,42 @@ function Write-ColorOutput {
     Write-Host $Message -ForegroundColor $Color
 }
 
-# Detect Windows architecture
-function Get-WindowsArchitecture {
-    $arch = (Get-WmiObject Win32_Processor).Architecture
-    switch ($arch) {
-        0 { return "amd64" }      # x86
-        9 { return "amd64" }      # x64
-        12 { return "arm64" }     # ARM64
-        default { 
-            Write-ColorOutput "Unsupported architecture detected." Red
-            exit 1 
-        }
+# Get latest version from GitHub API
+function Get-LatestVersion {
+    $apiUrl = "https://api.github.com/repos/$Repo/releases/latest"
+    Write-ColorOutput "Fetching latest version from GitHub..." Yellow
+    
+    try {
+        $response = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 10
+        $script:Version = $response.tag_name
+        Write-ColorOutput "Latest version detected: $Version" Green
+        return $Version
+    }
+    catch {
+        Write-ColorOutput "Failed to fetch latest version: $_" Red
+        Write-ColorOutput "Please check your network connection or specify -Version parameter." Yellow
+        exit 1
     }
 }
 
-# Check if running as Administrator
-function Test-Administrator {
-    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+# Detect Windows architecture
+function Get-WindowsArchitecture {
+    try {
+        $arch = (Get-CimInstance Win32_Processor).Architecture
+        switch ($arch) {
+            0 { return "amd64" }      # x86
+            9 { return "amd64" }      # x64
+            12 { return "arm64" }     # ARM64
+            default { 
+                Write-ColorOutput "Unsupported architecture detected: $arch" Red
+                exit 1 
+            }
+        }
+    }
+    catch {
+        Write-ColorOutput "Failed to detect architecture: $_" Red
+        exit 1
+    }
 }
 
 # Create installation directory
@@ -52,6 +69,37 @@ function New-InstallationDirectory {
     }
 }
 
+# Download file with retry
+function Invoke-DownloadWithRetry {
+    param(
+        [string]$Url,
+        [string]$OutputPath,
+        [int]$MaxAttempts = 3
+    )
+    
+    $attempt = 1
+    while ($attempt -le $MaxAttempts) {
+        Write-ColorOutput "Download attempt $attempt/$MaxAttempts..." Yellow
+        
+        try {
+            $webClient = New-Object System.Net.WebClient
+            $webClient.DownloadFile($Url, $OutputPath)
+            Write-ColorOutput "Download completed successfully!" Green
+            return $true
+        }
+        catch {
+            Write-ColorOutput "Download failed: $_" Red
+            $attempt++
+            if ($attempt -le $MaxAttempts) {
+                Write-ColorOutput "Retrying in 2 seconds..." Yellow
+                Start-Sleep -Seconds 2
+            }
+        }
+    }
+    
+    return $false
+}
+
 # Download PolyAgent binary
 function Invoke-PolyAgentDownload {
     param(
@@ -60,15 +108,10 @@ function Invoke-PolyAgentDownload {
     )
     
     Write-ColorOutput "Downloading PolyAgent from:" Yellow
-    Write-ColorOutput $Url - Yellow
+    Write-ColorOutput $Url Yellow
     
-    try {
-        $webClient = New-Object System.Net.WebClient
-        $webClient.DownloadFile($Url, $OutputPath)
-        Write-ColorOutput "Download completed successfully!" Green
-    }
-    catch {
-        Write-ColorOutput "Failed to download PolyAgent: $_" Red
+    if (-not (Invoke-DownloadWithRetry -Url $Url -OutputPath $OutputPath)) {
+        Write-ColorOutput "Failed to download PolyAgent after multiple attempts." Red
         exit 1
     }
 }
@@ -85,11 +128,11 @@ function Add-ToPath {
         $newPath = "$currentPath;$Path"
         [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
         
-        # Also update current session
+        # Also update current session so user can run polyagent immediately
         $env:PATH = "$env:PATH;$Path"
         
-        Write-ColorOutput "PATH updated. Please restart your terminal or run:" Yellow
-        Write-ColorOutput "  `$env:PATH = `"$Path;`$env:PATH`"" Yellow
+        Write-ColorOutput "PATH updated successfully!" Green
+        Write-ColorOutput "You can now run 'polyagent' from any terminal window." Green
     }
 }
 
@@ -140,6 +183,7 @@ function Install-PolyAgent {
     
     $binaryName = "polyagent-windows-$arch.exe"
     $downloadUrl = "$ReleaseUrl/$binaryName"
+    $checksumUrl = "$ReleaseUrl/checksums.txt"
     
     # Create installation directory
     New-InstallationDirectory -Path $InstallDir
@@ -147,6 +191,33 @@ function Install-PolyAgent {
     # Download binary
     $binaryPath = Join-Path $InstallDir "polyagent.exe"
     Invoke-PolyAgentDownload -Url $downloadUrl -OutputPath $binaryPath
+    
+    # Download and verify checksum if available
+    Write-ColorOutput "Verifying checksum..." Yellow
+    $checksumPath = Join-Path $env:TEMP "checksums.txt"
+    if (Invoke-DownloadWithRetry -Url $checksumUrl -OutputPath $checksumPath) {
+        $checksumContent = Get-Content $checksumPath
+        $expectedChecksum = ($checksumContent | Select-String -Pattern $binaryName).ToString().Split()[0]
+        
+        if ($expectedChecksum) {
+            $actualChecksum = (Get-FileHash -Path $binaryPath -Algorithm SHA256).Hash
+            if ($expectedChecksum -ne $actualChecksum) {
+                Write-ColorOutput "Checksum verification failed!" Red
+                Write-ColorOutput "Expected: $expectedChecksum" Red
+                Write-ColorOutput "Actual: $actualChecksum" Red
+                exit 1
+            }
+            Write-ColorOutput "Checksum verified successfully!" Green
+        }
+        else {
+            Write-ColorOutput "No checksum found for this binary, skipping verification." Yellow
+        }
+        
+        Remove-Item $checksumPath -Force
+    }
+    else {
+        Write-ColorOutput "Could not download checksums.txt, skipping verification." Yellow
+    }
     
     # Add to PATH if not already there
     Add-ToPath -Path $InstallDir

@@ -74,7 +74,7 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then
             output_name="${output_name}.exe"
           fi
-          go build -ldflags="-s -w" -o "${output_name}" ./cmd/polyagent
+          go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o "${output_name}" ./cmd/polyagent
         shell: bash
 
       - name: Upload artifact
