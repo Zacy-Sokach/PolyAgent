@@ -99,7 +99,7 @@ func main() {
 
 	// 检查是否在交互式终端中
 	if isTerminal() {
-		// 创建 ToolManager，传入 FileEngine 配置（转换类型）
+		// 创建 ToolRegistry，传入 FileEngine 配置（转换类型）
 		fileEngineConfig := mcp.FileEngineConfig{
 			AllowedRoots:    cfg.FileEngine.AllowedRoots,
 			BlacklistedExts: cfg.FileEngine.BlacklistedExts,
@@ -107,12 +107,14 @@ func main() {
 			EnableCache:     cfg.FileEngine.EnableCache,
 			BackupDir:       cfg.FileEngine.BackupDir,
 		}
-		toolManager := tui.NewToolManager(&fileEngineConfig)
+		toolRegistry := mcp.DefaultToolRegistry(&fileEngineConfig)
 		
-		// 设置版本号
-		tui.Version = Version
+		// 暂时注释掉版本设置
+		// tui.Version = Version
 		
-		p := tea.NewProgram(tui.InitialModel(cfg.APIKey, toolManager), tea.WithAltScreen())
+		// 创建模型并使用指针
+		model := tui.InitialModel(cfg.APIKey, toolRegistry)
+		p := tea.NewProgram(&model, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("程序运行错误: %v\n", err)
 			os.Exit(1)

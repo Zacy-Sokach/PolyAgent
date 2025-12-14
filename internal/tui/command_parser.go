@@ -22,6 +22,11 @@ const (
 	CommandTypeInit
 	CommandTypeCheckUpdate
 	CommandTypeUpdate
+	CommandTypeCoTEnable
+	CommandTypeCoTDisable
+	CommandTypeCoTToggle
+	CommandTypeCoTHistory
+	CommandTypeClear
 )
 
 // Command 解析后的命令
@@ -47,6 +52,11 @@ type CommandParser struct {
 	initPatterns         []*regexp.Regexp
 	checkUpdatePatterns  []*regexp.Regexp
 	updatePatterns       []*regexp.Regexp
+	cotEnablePatterns    []*regexp.Regexp
+	cotDisablePatterns   []*regexp.Regexp
+	cotTogglePatterns    []*regexp.Regexp
+	cotHistoryPatterns   []*regexp.Regexp
+	clearPatterns        []*regexp.Regexp
 }
 
 // NewCommandParser 创建新的命令解析器
@@ -133,6 +143,40 @@ func (p *CommandParser) initializePatterns() {
 		regexp.MustCompile(`(?i)^update$`),
 		regexp.MustCompile(`(?i)^更新$`),
 		regexp.MustCompile(`^/update$`),
+	}
+
+	// CoT启用命令模式
+	p.cotEnablePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^cot\s+enable$`),
+		regexp.MustCompile(`(?i)^启用思考$`),
+		regexp.MustCompile(`^/cot-enable$`),
+	}
+
+	// CoT禁用命令模式
+	p.cotDisablePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^cot\s+disable$`),
+		regexp.MustCompile(`(?i)^禁用思考$`),
+		regexp.MustCompile(`^/cot-disable$`),
+	}
+
+	// CoT切换命令模式
+	p.cotTogglePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^cot\s+toggle$`),
+		regexp.MustCompile(`(?i)^切换思考显示$`),
+		regexp.MustCompile(`^/cot-toggle$`),
+	}
+
+	// CoT历史命令模式
+	p.cotHistoryPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^cot\s+history$`),
+		regexp.MustCompile(`(?i)^思考历史$`),
+		regexp.MustCompile(`^/cot-history$`),
+	}
+
+	// clear命令模式
+	p.clearPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^/clear$`),
+		regexp.MustCompile(`^/clear\s*$`),
 	}
 }
 
@@ -278,6 +322,56 @@ func (p *CommandParser) Parse(input string) *Command {
 		}
 	}
 
+	// 检查CoT启用命令
+	for _, pattern := range p.cotEnablePatterns {
+		if pattern.MatchString(input) {
+			return &Command{
+				Type: CommandTypeCoTEnable,
+				Raw:  input,
+			}
+		}
+	}
+
+	// 检查CoT禁用命令
+	for _, pattern := range p.cotDisablePatterns {
+		if pattern.MatchString(input) {
+			return &Command{
+				Type: CommandTypeCoTDisable,
+				Raw:  input,
+			}
+		}
+	}
+
+	// 检查CoT切换命令
+	for _, pattern := range p.cotTogglePatterns {
+		if pattern.MatchString(input) {
+			return &Command{
+				Type: CommandTypeCoTToggle,
+				Raw:  input,
+			}
+		}
+	}
+
+	// 检查CoT历史命令
+	for _, pattern := range p.cotHistoryPatterns {
+		if pattern.MatchString(input) {
+			return &Command{
+				Type: CommandTypeCoTHistory,
+				Raw:  input,
+			}
+		}
+	}
+
+	// 检查clear命令
+	for _, pattern := range p.clearPatterns {
+		if pattern.MatchString(input) {
+			return &Command{
+				Type: CommandTypeClear,
+				Raw:  input,
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -311,6 +405,16 @@ func FormatCommandType(cmdType CommandType) string {
 		return "CHECK_UPDATE"
 	case CommandTypeUpdate:
 		return "UPDATE"
+	case CommandTypeCoTEnable:
+		return "COT_ENABLE"
+	case CommandTypeCoTDisable:
+		return "COT_DISABLE"
+	case CommandTypeCoTToggle:
+		return "COT_TOGGLE"
+	case CommandTypeCoTHistory:
+		return "COT_HISTORY"
+	case CommandTypeClear:
+		return "CLEAR"
 	default:
 		return "UNKNOWN"
 	}

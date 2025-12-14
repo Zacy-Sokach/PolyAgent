@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -171,12 +172,17 @@ func (t *SearchFileContentTool) Execute(args map[string]interface{}) (interface{
 		return nil, fmt.Errorf("无效的正则表达式: %w", err)
 	}
 
-	var results []string
-
-	// 递归搜索文件
+	// 使用并发搜索优化性能
+	const maxWorkers = 8 // 限制并发数，避免资源耗尽
+	const maxFileSize = 5 * 1024 * 1024 // 降低到5MB，减少内存使用
+	
+	var filesToSearch []string
+	var mu sync.Mutex
+	
+	// 第一阶段：收集需要搜索的文件
 	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return nil // 跳过错误，继续处理其他文件
 		}
 
 		if info.IsDir() {
@@ -189,41 +195,79 @@ func (t *SearchFileContentTool) Execute(args map[string]interface{}) (interface{
 			return nil
 		}
 
-		// 性能优化：检查文件大小，避免读取过大文件
-		if info.Size() > 10*1024*1024 { // 10MB限制
-			return nil // 跳过大于10MB的文件
+		// 检查文件大小
+		if info.Size() > maxFileSize {
+			return nil // 跳过大文件
 		}
 
-		content, err := os.ReadFile(filePath)
-		if err != nil {
-			return nil // 跳过无法读取的文件
-		}
-
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
-			if re.MatchString(line) {
-				// 使用高效的字符串构建，避免 fmt.Sprintf 开销
-				var resultBuilder strings.Builder
-				resultBuilder.Grow(len(filePath) + len(line) + 20)
-				resultBuilder.WriteString(filePath)
-				resultBuilder.WriteByte(':')
-				resultBuilder.WriteString(fmt.Sprint(i + 1))
-				resultBuilder.WriteString(": ")
-				resultBuilder.WriteString(line)
-				results = append(results, resultBuilder.String())
-
-				// 限制每个文件的最大匹配数
-				if len(results) >= 1000 {
-					return fmt.Errorf("达到最大匹配数限制: 1000")
-				}
-			}
-		}
-
+		filesToSearch = append(filesToSearch, filePath)
 		return nil
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("搜索文件时出错: %w", err)
+		return nil, fmt.Errorf("遍历目录失败: %w", err)
+	}
+
+	// 第二阶段：并发搜索文件内容
+	var results []string
+	resultsChan := make(chan []string, len(filesToSearch))
+	
+	// 创建工作池
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, maxWorkers)
+	
+	for _, filePath := range filesToSearch {
+		wg.Add(1)
+		go func(fp string) {
+			defer wg.Done()
+			semaphore <- struct{}{} // 获取信号量
+			defer func() { <-semaphore }() // 释放信号量
+			
+			content, err := os.ReadFile(fp)
+			if err != nil {
+				return // 跳过无法读取的文件
+			}
+
+			lines := strings.Split(string(content), "\n")
+			var fileResults []string
+			var resultBuilder strings.Builder
+			
+			for i, line := range lines {
+				if re.MatchString(line) {
+					// 使用字符串构建器，避免 fmt.Sprintf 开销
+					resultBuilder.Reset()
+					resultBuilder.Grow(len(fp) + len(line) + 20)
+					resultBuilder.WriteString(fp)
+					resultBuilder.WriteByte(':')
+					resultBuilder.WriteString(fmt.Sprint(i + 1))
+					resultBuilder.WriteString(": ")
+					resultBuilder.WriteString(line)
+					fileResults = append(fileResults, resultBuilder.String())
+				}
+			}
+			
+			if len(fileResults) > 0 {
+				resultsChan <- fileResults
+			}
+		}(filePath)
+	}
+	
+	// 等待所有goroutine完成
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+	
+	// 收集结果
+	for fileResults := range resultsChan {
+		mu.Lock()
+		results = append(results, fileResults...)
+		// 检查结果数量限制
+		if len(results) >= 1000 {
+			mu.Unlock()
+			return "达到最大匹配数限制: 1000", nil
+		}
+		mu.Unlock()
 	}
 
 	if len(results) == 0 {

@@ -37,6 +37,7 @@ type MarkdownRenderer struct {
 	styleStack []lipgloss.Style // 样式栈，用于嵌套样式
 	buffer     *bytes.Buffer    // 缓冲区，用于复杂节点捕获
 	maxStackDepth int           // 样式栈最大深度，防止栈溢出
+	renderCache sync.Map        // 渲染结果缓存，避免重复渲染
 }
 
 // NewMarkdownRenderer 初始化渲染器 (单例模式预加载)
@@ -133,8 +134,13 @@ func (r *MarkdownRenderer) Render(markdown string) string {
 	if len(markdown) == 0 {
 		return ""
 	}
-	
-	// 不再限制输入长度，允许完整渲染
+
+	// 检查缓存
+	if cached, ok := r.renderCache.Load(markdown); ok {
+		if result, ok := cached.(string); ok {
+			return result
+		}
+	}
 
 	// 添加panic恢复机制
 	defer func() {
@@ -154,12 +160,45 @@ func (r *MarkdownRenderer) Render(markdown string) string {
 
 	result := buf.String()
 	
-	// 验证输出结果，确保不包含恶意ANSI序列
-	if len(result) > len(markdown)*10 { // 输出不应该比输入大太多
-		return "⚠️ 渲染结果异常，返回原始内容:\n\n" + markdown
+	// 如果结果为空，返回原始内容
+	if len(result) == 0 && len(markdown) > 0 {
+		return markdown
+	}
+
+	// 缓存结果（限制缓存大小）
+	r.renderCache.Store(markdown, result)
+	
+	// 清理过多的缓存项（简单的LRU策略）
+	if count := r.cacheSize(); count > 100 {
+		r.clearOldestCache()
 	}
 
 	return result
+}
+
+// cacheSize 获取缓存大小
+func (r *MarkdownRenderer) cacheSize() int {
+	count := 0
+	r.renderCache.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+// clearOldestCache 清理最旧的缓存项
+func (r *MarkdownRenderer) clearOldestCache() {
+	// 简单策略：清理一半缓存
+	toDelete := r.cacheSize() / 2
+	deleted := 0
+	r.renderCache.Range(func(key, value interface{}) bool {
+		if deleted >= toDelete {
+			return false
+		}
+		r.renderCache.Delete(key)
+		deleted++
+		return true
+	})
 }
 
 // pushStyle 安全地推入样式栈
@@ -240,7 +279,7 @@ func (r *MarkdownRenderer) registerGFMElements(reg renderer.NodeRendererFuncRegi
 }
 
 // resolveKind 尝试解析节点类型
-func (r *MarkdownRenderer) resolveKind(kindName string) *ast.NodeKind {
+func (r *MarkdownRenderer) resolveKind(_ string) *ast.NodeKind {
 	// 这里使用一个简化的方法，通过字符串匹配来识别GFM节点
 	// 在实际运行时，goldmark会提供正确的节点类型
 	return nil // 暂时返回nil，在渲染时通过字符串匹配处理
@@ -538,7 +577,8 @@ func (r *MarkdownRenderer) renderTable(w util.BufWriter, source []byte, node ast
 // 辅助函数
 // ----------------------------------------------------------------------------
 
-// extractText 递归提取节点下的所有纯文本内容
+// extractText 从节点中提取纯文本内容
+// TODO: 实现或删除此未使用的方法
 func (r *MarkdownRenderer) extractText(node ast.Node, source []byte) string {
 	var buf bytes.Buffer
 	for child := node.FirstChild(); child != nil; child = child.NextSibling() {

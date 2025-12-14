@@ -112,8 +112,8 @@ download_with_retry() {
 # Download and install PolyAgent
 install_polyagent() {
     local binary_name="polyagent-${OS}-${ARCH}"
-    local download_url="https://github.com/${REPO}/releases/download/${VERSION}/${binary_name}"
-    local checksum_url="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
+    local download_url="https://xget.zacsokach.com/gh/${REPO}/releases/download/${VERSION}/${binary_name}"
+    local checksum_url="https://xget.zacsokach.com/gh/${REPO}/releases/download/${VERSION}/checksums.txt"
     
     echo -e "${YELLOW}Downloading PolyAgent from:${NC}"
     echo -e "${YELLOW}$download_url${NC}"

@@ -15,7 +15,7 @@ import (
 
 const (
 	tavilyCrawlURL = "https://api.tavily.com/crawl"
-	crawlTimeout   = 150 * time.Second // Crawl 可能需要更长时间
+	crawlTimeout   = 10 * time.Second
 )
 
 // TavilyCrawlTool Tavily 爬取工具

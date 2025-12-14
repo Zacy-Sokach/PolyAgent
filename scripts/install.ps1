@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 
 # Configuration
 $Repo = "Zacy-Sokach/PolyAgent"
-$ReleaseUrl = "https://github.com/$Repo/releases/download/$Version"
+$ReleaseUrl = "https://xget.zacsokach.com/gh/$Repo/releases/download/$Version"
 
 # Colors for output
 function Write-ColorOutput {
@@ -175,7 +175,7 @@ function Install-PolyAgent {
         Write-ColorOutput "Using specified version: $Version" Green
     }
     
-    $script:ReleaseUrl = "https://github.com/$Repo/releases/download/$Version"
+    $script:ReleaseUrl = "https://xget.zacsokach.com/gh/$Repo/releases/download/$Version"
     
     # Detect architecture
     $arch = Get-WindowsArchitecture

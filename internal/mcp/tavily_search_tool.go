@@ -15,7 +15,7 @@ import (
 
 const (
 	tavilySearchURL = "https://api.tavily.com/search"
-	tavilyTimeout   = 30 * time.Second
+	tavilyTimeout   = 10 * time.Second
 )
 
 // TavilySearchTool Tavily 搜索工具

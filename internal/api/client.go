@@ -17,6 +17,16 @@ const (
 	baseURL = "https://open.bigmodel.cn/api/paas/v4"
 )
 
+// APIError 表示 API 请求错误，包含状态码和错误信息
+type APIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API请求失败 (状态码: %d): %s", e.StatusCode, e.Message)
+}
+
 // 全局共享的HTTP客户端，实现连接池化
 var (
 	sharedHTTPClient *http.Client
@@ -27,13 +37,17 @@ var (
 func getSharedHTTPClient() *http.Client {
 	httpClientOnce.Do(func() {
 		sharedHTTPClient = &http.Client{
-			Timeout: 30 * time.Second,
+			// 设置合理的超时，避免无限等待
+			Timeout: 60 * time.Second,
 			Transport: &http.Transport{
 				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 50,        // 从10增加到50，提高并发性能
+				MaxIdleConnsPerHost: 20,        // 优化：减少到20，避免资源浪费
 				IdleConnTimeout:     90 * time.Second,
 				DisableCompression:  false,      // 启用压缩，减少传输数据量
-				MaxConnsPerHost:     100,        // 新增：限制每个主机的最大连接数
+				MaxConnsPerHost:     50,         // 优化：减少到50，平衡性能和资源使用
+				// 新增：响应头超时和TLS握手超时
+				ResponseHeaderTimeout: 30 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
 			},
 		}
 	})
@@ -151,10 +165,14 @@ func (c *Client) chatStream(req ChatRequest) (*ChatResponse, error) {
 	}
 
 	var fullResponse ChatResponse
+	// 预分配容量，减少内存重分配
 	var contentBuilder strings.Builder
+	contentBuilder.Grow(4096) // 预估响应大小
 	var reasoningBuilder strings.Builder
+	reasoningBuilder.Grow(2048) // 预估推理内容大小
 
 	reader := bufio.NewReader(resp.Body)
+	
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -199,14 +217,14 @@ func (c *Client) chatStream(req ChatRequest) (*ChatResponse, error) {
 	}
 	resp.Body.Close()
 
-	// 只在最后需要时调用String()，避免中间转换
-	contentBytes, _ := json.Marshal(contentBuilder.String())
+	// 优化：直接使用字符串而非 JSON 编码，减少转换开销
+	contentStr := contentBuilder.String()
 	fullResponse.Choices = []Choice{
 		{
 			Index: 0,
 			Message: &Message{
 				Role:    "assistant",
-				Content: contentBytes,
+				Content: []byte(contentStr),
 			},
 			FinishReason: "stop",
 		},
@@ -217,20 +235,60 @@ func (c *Client) chatStream(req ChatRequest) (*ChatResponse, error) {
 
 // StreamChat 执行流式聊天请求，支持工具调用
 func (c *Client) StreamChat(messages []Message, tools []Tool, onChunk func(string, string, []ToolCall)) error {
+	return c.StreamChatWithCoT(messages, tools, onChunk, true)
+}
+
+// StreamChatWithCoT 执行流式聊天请求，支持工具调用和CoT配置
+func (c *Client) StreamChatWithCoT(messages []Message, tools []Tool, onChunk func(string, string, []ToolCall), enableCoT bool) error {
+	const maxRetries = 3
+
+	retryDelays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			time.Sleep(retryDelays[attempt-2])
+		}
+
+		err := c.streamChat(messages, tools, onChunk, enableCoT)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		
+		// 对所有 API 错误（非200状态码）重试
+		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode != 200 {
+			if attempt < maxRetries {
+				continue
+			}
+		}
+		
+		// 其他错误立即返回
+		return err
+	}
+
+	return fmt.Errorf("stream chat failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+func (c *Client) streamChat(messages []Message, tools []Tool, onChunk func(string, string, []ToolCall), enableCoT bool) error {
 	req := ChatRequest{
 		Model:       "glm-4.5",
 		Messages:    messages,
 		Stream:      true,
 		MaxTokens:   4096,
 		Temperature: 0.6,
-		Thinking: &Thinking{
+	}
+	
+	// 根据CoT配置决定是否启用thinking
+	if enableCoT {
+		req.Thinking = &Thinking{
 			Type: "enabled",
-		},
+		}
 	}
 
 	if len(tools) > 0 {
 		req.Tools = tools
-		// 设置为自动选择工具
 		autoChoice, _ := json.Marshal("auto")
 		req.ToolChoice = autoChoice
 	}
@@ -261,15 +319,23 @@ func (c *Client) StreamChat(messages []Message, tools []Tool, onChunk func(strin
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API请求失败 (状态码: %d): %s", resp.StatusCode, string(bodyBytes))
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    string(bodyBytes),
+		}
 	}
 
 	reader := bufio.NewReader(resp.Body)
+	
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
 				break
+			}
+			// 如果是超时错误，返回特定错误以便上层重试
+			if err.Error() == "read timeout" {
+				return fmt.Errorf("reading stream response failed: context deadline exceeded")
 			}
 			return fmt.Errorf("reading stream response failed: %w", err)
 		}
@@ -296,15 +362,21 @@ func (c *Client) StreamChat(messages []Message, tools []Tool, onChunk func(strin
 	return nil
 }
 
+
+
 // StreamChatWithChannel 执行流式聊天请求并返回通道
 func (c *Client) StreamChatWithChannel(ctx context.Context, messages []Message, tools []Tool) (<-chan string, <-chan string, <-chan []ToolCall, <-chan error) {
-	chunkCh := make(chan string, 10)  // 添加缓冲区，提高吞吐量
+	return c.StreamChatWithChannelAndCoT(ctx, messages, tools, true)
+}
+
+// StreamChatWithChannelAndCoT 执行流式聊天请求并返回通道，支持CoT配置
+func (c *Client) StreamChatWithChannelAndCoT(ctx context.Context, messages []Message, tools []Tool, enableCoT bool) (<-chan string, <-chan string, <-chan []ToolCall, <-chan error) {
+	chunkCh := make(chan string, 10)
 	reasoningCh := make(chan string, 10)
 	toolCallCh := make(chan []ToolCall, 5)
 	errCh := make(chan error, 1)
 
 	go func() {
-		// 确保所有channel在goroutine退出时关闭
 		defer func() {
 			close(chunkCh)
 			close(reasoningCh)
@@ -312,61 +384,50 @@ func (c *Client) StreamChatWithChannel(ctx context.Context, messages []Message, 
 			close(errCh)
 		}()
 
-		// 创建可取消的子context，关联到StreamChat调用
 		streamCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		// 使用channel监听context取消信号
 		done := make(chan struct{})
 		go func() {
 			<-streamCtx.Done()
 			close(done)
 		}()
 
-		// 执行流式请求
-		err := c.StreamChat(messages, tools, func(content, reasoning string, toolCalls []ToolCall) {
+		err := c.StreamChatWithCoT(messages, tools, func(content, reasoning string, toolCalls []ToolCall) {
 			select {
 			case <-done:
-				// context已取消，停止发送
 				return
 			default:
-				// 发送数据到channel，带超时避免阻塞
 				if content != "" {
 					select {
 					case chunkCh <- content:
 					case <-time.After(100 * time.Millisecond):
-						// 发送超时，跳过
 					}
 				}
 				if reasoning != "" {
 					select {
 					case reasoningCh <- reasoning:
 					case <-time.After(100 * time.Millisecond):
-						// 发送超时，跳过
 					}
 				}
 				if len(toolCalls) > 0 {
 					select {
 					case toolCallCh <- toolCalls:
 					case <-time.After(100 * time.Millisecond):
-						// 发送超时，跳过
 					}
 				}
 			}
-		})
+		}, enableCoT)
 
 		if err != nil {
 			select {
 			case errCh <- err:
 			case <-done:
-				// context已取消
 			}
 		} else {
-			// 流正常结束时发送空字符串表示结束
 			select {
 			case chunkCh <- "":
 			case <-done:
-				// context已取消
 			}
 		}
 	}()

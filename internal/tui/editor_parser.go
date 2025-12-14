@@ -76,17 +76,18 @@ func (p *EditorParser) parseStructuredCommand(text string) (*EditCommand, bool) 
 		}
 		cmd.Offset = offset
 
-		if cmd.Type == "insert" {
+		switch cmd.Type {
+		case "insert":
 			if len(parts) >= 6 {
 				cmd.Content = parts[5]
 			}
-		} else if cmd.Type == "delete" {
+		case "delete":
 			length, err := strconv.Atoi(parts[4])
 			if err != nil {
 				return nil, false
 			}
 			cmd.Length = length
-		} else if cmd.Type == "replace" {
+		case "replace":
 			length, err := strconv.Atoi(parts[4])
 			if err != nil {
 				return nil, false

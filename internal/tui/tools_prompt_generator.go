@@ -104,7 +104,7 @@ func (g *ToolsPromptGenerator) GenerateSystemPrompt(tools []api.Tool, agentMDCon
 
 	// 添加项目上下文（如果存在）
 	if agentMDContent != "" {
-		promptBuilder.WriteString("\n\n====\n\n项目上下文（来自 AGENT.md）：\n\n")
+		promptBuilder.WriteString("\n\n====\n\n项目上下文（来自 AGENTS.md）：\n\n")
 		promptBuilder.WriteString(agentMDContent)
 		promptBuilder.WriteString("\n\n====\n\n")
 	}
