@@ -47,12 +47,11 @@ jobs:
             runner: windows-latest
             goos: windows
             goarch: amd64
-          # Windows ARM64 暂时跳过，Rust 不支持 aarch64-pc-windows-gnu 目标
-          # - os: windows
-          #   arch: arm64
-          #   runner: windows-latest
-          #   goos: windows
-          #   goarch: arm64
+          - os: windows
+            arch: arm64
+            runner: windows-latest
+            goos: windows
+            goarch: arm64
 
     steps:
       - name: Checkout code
@@ -68,29 +67,28 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Install Rust targets
+      - name: Install Required Rust Target (Optimized)
         run: |
-          # 根据当前矩阵变量动态确定 Rust 目标
-          RUST_TARGET="${{ matrix.goarch }}-unknown-${{ matrix.goos }}-gnu"
+          # 动态确定并安装当前 Job 所需的单一 Rust 目标，解决 macOS 兼容性问题。
+          RUST_ARCH="${{ matrix.goarch }}"
+          RUST_OS="${{ matrix.goos }}"
           
-          # 修正 Windows targets 的 triple：windows 使用 pc-vendor
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            RUST_TARGET="${{ matrix.goarch }}-pc-windows-gnu"
+          if [ "$RUST_OS" = "darwin" ]; then
+            TARGET="$RUST_ARCH-apple-darwin"
+          elif [ "$RUST_OS" = "windows" ]; then
+            TARGET="$RUST_ARCH-pc-windows-gnu"
+          else
+            TARGET="$RUST_ARCH-unknown-linux-gnu"
           fi
           
-          # 修正 macOS targets 的 triple：macOS 使用 apple-vendor
-          if [ "${{ matrix.goos }}" = "darwin" ]; then
-            RUST_TARGET="${{ matrix.goarch }}-apple-darwin"
-          fi
-          
-          # Windows ARM64 暂不支持，使用 x86_64 代替
-          if [ "${{ matrix.goos }}" = "windows" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+          # Windows ARM64 特殊处理：如果目标不支持，使用 x86_64
+          if [ "$RUST_OS" = "windows" ] && [ "$RUST_ARCH" = "arm64" ]; then
             echo "Warning: Windows ARM64 not supported, using x86_64 instead"
-            RUST_TARGET="x86_64-pc-windows-gnu"
+            TARGET="x86_64-pc-windows-gnu"
           fi
           
-          echo "Installing required Rust target: $RUST_TARGET"
-          rustup target add $RUST_TARGET
+          echo "Installing required Rust target: $TARGET"
+          rustup target add $TARGET
         shell: bash
 
       - name: Install cross-compilation tools (Linux)
@@ -100,21 +98,14 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
         shell: bash
 
-      - name: Install cross-compilation tools (macOS)
-        if: matrix.os == 'darwin'
-        run: |
-          # macOS 通常不需要额外的交叉编译工具
-          echo "macOS cross-compilation setup"
-        shell: bash
-
       - name: Install cross-compilation tools (Windows)
         if: matrix.os == 'windows'
         run: |
-          # 安装 MinGW-w64 用于 Windows 交叉编译
+          # 针对 Windows x86_64 安装 MinGW-w64
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64
         shell: bash
-
+        
       - name: Get Go dependencies
         run: go mod download
 
@@ -122,7 +113,7 @@ jobs:
         run: |
           cd internal/tui/rust_markdown
           
-          # 设置目标三元组
+          # 设置目标三元组 (与上方 Install Rust Target 逻辑保持一致)
           if [ "${{ matrix.goos }}" = "linux" ]; then
             if [ "${{ matrix.goarch }}" = "arm64" ]; then
               TARGET="aarch64-unknown-linux-gnu"
@@ -137,8 +128,7 @@ jobs:
             fi
           elif [ "${{ matrix.goos }}" = "windows" ]; then
             if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              # Windows ARM64 不受支持，使用 x86_64 代替
-              echo "Warning: Windows ARM64 not supported, using x86_64 instead"
+              # Windows ARM64 使用 x86_64 代替
               TARGET="x86_64-pc-windows-gnu"
             else
               TARGET="x86_64-pc-windows-gnu"
@@ -147,51 +137,49 @@ jobs:
           
           # 为交叉编译设置链接器
           if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+            # 针对 Linux ARM64 显式指定链接器
             cargo build --release --target="$TARGET" --config "target.aarch64-unknown-linux-gnu.linker = \"aarch64-linux-gnu-gcc\""
           elif [ "${{ matrix.goos }}" = "windows" ]; then
+            # 针对 Windows 显式指定 MinGW-w64 链接器
             cargo build --release --target="$TARGET" --config "target.x86_64-pc-windows-gnu.linker = \"x86_64-w64-mingw32-gcc\""
           else
             cargo build --release --target="$TARGET"
           fi
           
-          # 复制构建的库到通用位置
+          # 复制构建的静态库 (CGO 需要)
           mkdir -p target/release
           if [ -d "target/$TARGET/release" ]; then
             cp target/$TARGET/release/librust_markdown.a target/release/ || true
-            cp target/$TARGET/release/librust_markdown.so target/release/ || true
-            cp target/$TARGET/release/rust_markdown.dll target/release/ || true
-            cp target/$TARGET/release/librust_markdown.dylib target/release/ || true
+            # 仅复制静态库，避免复制动态库时的文件类型冗余和潜在错误
           fi
         shell: bash
 
-      - name: Build binary
+      - name: Build binary (Optimized CC/LDFLAGS)
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
         run: |
           output_name="polyagent-${{ matrix.os }}-${{ matrix.arch }}"
+          CC_CMD=""
+          LDFLAGS=""
+
           if [ "${{ matrix.goos }}" = "windows" ]; then
             output_name="${output_name}.exe"
-            export CC=x86_64-w64-mingw32-gcc
+            CC_CMD="x86_64-w64-mingw32-gcc"
+          elif [ "${{ matrix.goos }}" = "linux" ]; then
+            LDFLAGS="-static" # Linux 静态链接
+            if [ "${{ matrix.goarch }}" = "arm64" ]; then
+              CC_CMD="aarch64-linux-gnu-gcc"
+            fi
+          elif [ "${{ matrix.goos }}" = "darwin" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+            # macOS ARM64 交叉编译
+            CC_CMD="arm64-apple-darwin20.2-clang"
           fi
           
-          # 设置特定平台的链接标志
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              export CC=aarch64-linux-gnu-gcc
-              export CGO_LDFLAGS="-static"
-            else
-              export CGO_LDFLAGS="-static"
-            fi
-          elif [ "${{ matrix.goos }}" = "darwin" ]; then
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              export CC=arm64-apple-darwin20.2-clang
-              export CGO_LDFLAGS="-L/usr/local/opt/llvm/lib"
-            else
-              export CC=o64-apple-darwin20.2-clang
-            fi
-          fi
+          # 导出环境变量
+          if [ -n "$CC_CMD" ]; then export CC=$CC_CMD; fi
+          if [ -n "$LDFLAGS" ]; then export CGO_LDFLAGS=$LDFLAGS; fi
           
           go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o "${output_name}" ./cmd/polyagent
         shell: bash
@@ -218,20 +206,18 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create checksums
+      - name: Create checksums (Optimized)
         run: |
-          cd artifacts
-          for dir in */; do
-            if [ -d "$dir" ]; then
-              cd "$dir"
-              file=$(ls | head -n 1)
-              if [ -n "$file" ]; then
-                sha256sum "$file" >> "../checksums.txt"
-              fi
-              cd ..
+          # 遍历所有二进制文件并计算 SHA256
+          find artifacts -type f -exec basename {} \; | while read file; do
+            if [[ "$file" != "checksums.txt" ]]; then
+              sha256sum "artifacts/*/""$file" >> "artifacts/checksums.txt"
             fi
           done
-
+          echo "--- SHA256 Checksums ---"
+          cat artifacts/checksums.txt
+        shell: bash
+        
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
