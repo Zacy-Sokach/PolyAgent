@@ -20,16 +20,38 @@ const (
 
 // TavilyCrawlTool Tavily 爬取工具
 type TavilyCrawlTool struct {
-	Client *http.Client
+	Client utils.Doer
 	APIKey string
 }
 
 // NewTavilyCrawlTool 创建新的 TavilyCrawlTool 实例
 func NewTavilyCrawlTool() *TavilyCrawlTool {
-	return &TavilyCrawlTool{
-		Client: &http.Client{
-			Timeout: crawlTimeout,
+	baseClient := &http.Client{
+		Timeout: crawlTimeout,
+	}
+	
+	// 配置重试参数
+	retryConfig := &utils.RetryConfig{
+		MaxRetries:         3,
+		InitialDelay:       1 * time.Second,
+		MaxDelay:           30 * time.Second,
+		BackoffMultiplier:  2.0,
+		RetryableStatusCodes: []int{
+			http.StatusRequestTimeout,      // 408
+			http.StatusTooManyRequests,     // 429
+			http.StatusInternalServerError, // 500
+			http.StatusBadGateway,          // 502
+			http.StatusServiceUnavailable,  // 503
+			http.StatusGatewayTimeout,      // 504
 		},
+		RetryableErrors: func(err error) bool {
+			// 重试网络错误和超时
+			return true
+		},
+	}
+	
+	return &TavilyCrawlTool{
+		Client: utils.NewRetryableHTTPClient(baseClient, retryConfig),
 	}
 }
 

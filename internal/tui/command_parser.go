@@ -19,6 +19,7 @@ const (
 	CommandTypeTaskRemove
 	CommandTypeTaskClear
 	CommandTypePlanUpdate
+	CommandTypeClear
 	CommandTypeInit
 	CommandTypeCheckUpdate
 	CommandTypeUpdate
@@ -49,6 +50,7 @@ type CommandParser struct {
 	taskRemovePatterns   []*regexp.Regexp
 	taskClearPatterns    []*regexp.Regexp
 	planUpdatePatterns   []*regexp.Regexp
+	clearPatterns        []*regexp.Regexp
 	initPatterns         []*regexp.Regexp
 	checkUpdatePatterns  []*regexp.Regexp
 	updatePatterns       []*regexp.Regexp
@@ -123,6 +125,12 @@ func (p *CommandParser) initializePatterns() {
 		regexp.MustCompile(`(?i)^PLAN\s+UPDATE\s+(.+)$`),
 		regexp.MustCompile(`更新计划文档\s*[:：]?\s*(.+)`),
 		regexp.MustCompile(`(?i)update\s+plan\s+(.+)`),
+	}
+
+	// clear 命令模式（必须使用 /clear 格式避免误触）
+	p.clearPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^/clear$`),
+		regexp.MustCompile(`^/clear\s*$`),
 	}
 
 	// init 命令模式（使用 /init 格式避免误触）
@@ -292,6 +300,16 @@ func (p *CommandParser) Parse(input string) *Command {
 		}
 	}
 
+	// 检查 clear 命令
+	for _, pattern := range p.clearPatterns {
+		if pattern.MatchString(input) {
+			return &Command{
+				Type: CommandTypeClear,
+				Raw:  input,
+			}
+		}
+	}
+
 	// 检查 init 命令
 	for _, pattern := range p.initPatterns {
 		if pattern.MatchString(input) {
@@ -399,6 +417,8 @@ func FormatCommandType(cmdType CommandType) string {
 		return "TASK_CLEAR"
 	case CommandTypePlanUpdate:
 		return "PLAN_UPDATE"
+	case CommandTypeClear:
+		return "CLEAR"
 	case CommandTypeInit:
 		return "INIT"
 	case CommandTypeCheckUpdate:
