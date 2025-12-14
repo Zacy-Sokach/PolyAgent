@@ -2,11 +2,13 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/Zacy-Sokach/PolyAgent/internal/api"
+	"github.com/Zacy-Sokach/PolyAgent/internal/mcp"
 	"github.com/Zacy-Sokach/PolyAgent/internal/update"
 	"github.com/Zacy-Sokach/PolyAgent/internal/utils"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -17,6 +19,31 @@ import (
 
 // Version 是当前的 PolyAgent 版本，由 main 包设置
 var Version string
+
+// Message types for Bubble Tea
+type CheckStreamMsg struct{}
+
+type StreamChunkMsg struct {
+	Chunk     string
+	Reasoning string
+}
+
+type ResponseMsg struct {
+	Content string
+}
+
+type ToolCallMsg struct {
+	ToolCalls []api.ToolCall
+}
+
+type ToolResultMsg struct {
+	ResultMessages []api.Message
+	DisplayContent string
+}
+
+type StreamErrorMsg struct {
+	Error error
+}
 
 type Message struct {
 	Role    string
@@ -34,6 +61,88 @@ type PlanDoc struct {
 	Content   string
 	Version   int
 	UpdatedAt time.Time
+}
+
+// ToolManager wraps MCP ToolRegistry for TUI usage
+type ToolManager struct {
+	registry *mcp.ToolRegistry
+}
+
+// NewToolManager creates a new ToolManager with default tools
+func NewToolManager() *ToolManager {
+	return &ToolManager{
+		registry: mcp.DefaultToolRegistry(nil),
+	}
+}
+
+// NewToolManagerWithRegistry creates a ToolManager with custom registry
+func NewToolManagerWithRegistry(registry *mcp.ToolRegistry) *ToolManager {
+	return &ToolManager{
+		registry: registry,
+	}
+}
+
+// GetToolsForAPI returns tools in API format
+func (tm *ToolManager) GetToolsForAPI() []api.Tool {
+	mcpTools := tm.registry.ListTools()
+	tools := make([]api.Tool, len(mcpTools))
+	
+	for i, t := range mcpTools {
+		tools[i] = api.Tool{
+			Type: "function",
+			Function: api.ToolFunction{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters: map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+				},
+			},
+		}
+	}
+	
+	return tools
+}
+
+// HandleToolCalls executes tool calls and returns API messages
+func (tm *ToolManager) HandleToolCalls(toolCalls []api.ToolCall) ([]api.Message, error) {
+	var messages []api.Message
+	
+	for _, call := range toolCalls {
+		// Convert json.RawMessage to map[string]interface{}
+		var args map[string]interface{}
+		if err := json.Unmarshal(call.Function.Arguments, &args); err != nil {
+			// If unmarshaling fails, try to use as string
+			args = map[string]interface{}{
+				"input": string(call.Function.Arguments),
+			}
+		}
+		
+		// Convert to MCP request
+		mcpRequest := mcp.CallToolRequest{
+			Name:      call.Function.Name,
+			Arguments: args,
+		}
+		
+		// Execute via MCP registry
+		result, err := tm.registry.HandleCallTool(mcpRequest)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Convert to API message
+		if len(result.Content) > 0 {
+			content := result.Content[0].Text
+			messages = append(messages, api.ToolResultMessage(call.ID, content))
+		}
+	}
+	
+	return messages, nil
+}
+
+// FormatToolCallForDisplay formats tool call for UI display
+func (tm *ToolManager) FormatToolCallForDisplay(call api.ToolCall) string {
+	return fmt.Sprintf("🔧 调用工具: %s\n参数: %v", call.Function.Name, call.Function.Arguments)
 }
 
 type Model struct {
@@ -938,4 +1047,32 @@ func (m *Model) handleUpdateCommand() tea.Cmd {
 			Content: fmt.Sprintf("更新成功! 请重启 PolyAgent 以使用新版本。"),
 		}
 	}
+}
+
+// addSystemPromptIfNeeded 添加系统提示（如果有工具）
+func addSystemPromptIfNeeded(messages []api.Message) []api.Message {
+	// 检查是否已经有系统提示
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			return messages
+		}
+	}
+	
+	// 添加系统提示
+	systemPrompt := `你是一个AI助手，可以使用各种工具来帮助用户完成任务。
+可用的工具包括：
+- 文件操作：读取、写入、搜索文件
+- 目录操作：列出目录内容
+- Shell命令：执行系统命令
+- 网络搜索：搜索网络信息
+- Git操作：执行Git命令
+- 时间工具：获取当前时间
+
+请根据用户需求选择合适的工具来完成任务。`
+	
+	result := make([]api.Message, len(messages)+1)
+	result[0] = api.TextMessage("system", systemPrompt)
+	copy(result[1:], messages)
+	
+	return result
 }

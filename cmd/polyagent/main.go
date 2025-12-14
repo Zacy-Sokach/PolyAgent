@@ -108,12 +108,13 @@ func main() {
 			BackupDir:       cfg.FileEngine.BackupDir,
 		}
 		toolRegistry := mcp.DefaultToolRegistry(&fileEngineConfig)
+		toolManager := tui.NewToolManagerWithRegistry(toolRegistry)
 		
 		// 暂时注释掉版本设置
 		// tui.Version = Version
 		
 		// 创建模型并使用指针
-		model := tui.InitialModel(cfg.APIKey, toolRegistry)
+		model := tui.InitialModel(cfg.APIKey, toolManager)
 		p := tea.NewProgram(&model, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("程序运行错误: %v\n", err)

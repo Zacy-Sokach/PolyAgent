@@ -27,7 +27,6 @@ const (
 	CommandTypeCoTDisable
 	CommandTypeCoTToggle
 	CommandTypeCoTHistory
-	CommandTypeClear
 )
 
 // Command 解析后的命令
@@ -58,7 +57,6 @@ type CommandParser struct {
 	cotDisablePatterns   []*regexp.Regexp
 	cotTogglePatterns    []*regexp.Regexp
 	cotHistoryPatterns   []*regexp.Regexp
-	clearPatterns        []*regexp.Regexp
 }
 
 // NewCommandParser 创建新的命令解析器
@@ -179,12 +177,6 @@ func (p *CommandParser) initializePatterns() {
 		regexp.MustCompile(`(?i)^cot\s+history$`),
 		regexp.MustCompile(`(?i)^思考历史$`),
 		regexp.MustCompile(`^/cot-history$`),
-	}
-
-	// clear命令模式
-	p.clearPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`^/clear$`),
-		regexp.MustCompile(`^/clear\s*$`),
 	}
 }
 
@@ -380,16 +372,6 @@ func (p *CommandParser) Parse(input string) *Command {
 		}
 	}
 
-	// 检查clear命令
-	for _, pattern := range p.clearPatterns {
-		if pattern.MatchString(input) {
-			return &Command{
-				Type: CommandTypeClear,
-				Raw:  input,
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -433,8 +415,6 @@ func FormatCommandType(cmdType CommandType) string {
 		return "COT_TOGGLE"
 	case CommandTypeCoTHistory:
 		return "COT_HISTORY"
-	case CommandTypeClear:
-		return "CLEAR"
 	default:
 		return "UNKNOWN"
 	}

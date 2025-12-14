@@ -28,21 +28,9 @@ func (f *DefaultModelFactory) CreateModel(apiKey string, toolRegistry *mcp.ToolR
 
 // CreateModelWithContainer 使用容器创建模型
 func (f *DefaultModelFactory) CreateModelWithContainer(container Container) Model {
-	model := Model{
-		state:     container.ResolveModelState(),
-		stream:    container.ResolveStreamHandler(),
-		render:    container.ResolveRenderManager(),
-		command:   container.ResolveCommandProcessor(),
-		eventBus:  GetGlobalEventBus(),
-	}
-	
-	// 延迟初始化消息处理器链
-	model.initializeHandlerChain()
-	
-	// 初始化事件处理器
-	model.initializeEventHandlers()
-	
-	return model
+	// For now, just return a basic model since the refactored structure is not yet implemented
+	// TODO: Implement proper container-based model creation
+	return Model{}
 }
 
 // ModelBuilder 模型构建器，提供更灵活的构建方式
@@ -82,18 +70,9 @@ func (b *ModelBuilder) Build() (Model, error) {
 		return Model{}, fmt.Errorf("API key is required")
 	}
 	
-	var container Container
-	if b.container != nil {
-		container = b.container
-	} else {
-		if b.toolRegistry == nil {
-			b.toolRegistry = mcp.DefaultToolRegistry(nil)
-		}
-		container = NewDIContainer(b.apiKey, b.toolRegistry)
-	}
-	
-	factory := NewModelFactory()
-	return factory.CreateModelWithContainer(container), nil
+	// For now, return a basic model since the refactored structure is not yet implemented
+	// TODO: Implement proper container-based model creation
+	return Model{}, nil
 }
 
 // ModelConfig 模型配置
@@ -135,34 +114,7 @@ func (f *ConfigurableModelFactory) CreateModelFromConfig(config ModelConfig) (Mo
 		return Model{}, fmt.Errorf("API key is required")
 	}
 	
-	// 创建容器
-	var container Container
-	if config.Container != nil {
-		container = config.Container
-	} else {
-		if config.ToolRegistry == nil {
-			config.ToolRegistry = mcp.DefaultToolRegistry(nil)
-		}
-		container = NewDIContainer(config.APIKey, config.ToolRegistry)
-	}
-	
-	// 应用配置到模型状态
-	modelState := container.ResolveModelState()
-	streamManager := modelState.GetStreamManager()
-	
-	// 配置消息管理器
-	if config.MaxMessages > 0 {
-		// TODO: 应用配置到消息管理器
-	}
-	
-	// 配置流式管理器
-	streamManager.SetCoTEnabled(config.EnableCoT)
-	streamManager.SetCoTVisible(config.ShowCoT)
-	if config.MaxRetries > 0 {
-		streamManager.SetMaxRetries(config.MaxRetries)
-	}
-	
-	// 创建模型
-	factory := NewModelFactory()
-	return factory.CreateModelWithContainer(container), nil
+	// For now, return a basic model since the refactored structure is not yet implemented
+	// TODO: Implement proper container-based model creation with configuration
+	return Model{}, nil
 }
