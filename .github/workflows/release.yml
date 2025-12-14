@@ -73,7 +73,7 @@ jobs:
           RUST_ARCH="${{ matrix.goarch }}"
           
           # --- 步骤 1: Go 架构到 Rust 架构的名称映射 ---
-          
+          # Go的amd64对应Rust的x86_64，Go的arm64对应Rust的aarch64
           RUST_TARGET_ARCH=""
           if [ "$RUST_ARCH" = "amd64" ]; then
             RUST_TARGET_ARCH="x86_64"
@@ -88,22 +88,22 @@ jobs:
 
           TARGET=""
           if [ "$RUST_OS" = "darwin" ]; then
-            # macOS: 使用 *-apple-darwin 格式
+            # macOS: *-apple-darwin 格式
             TARGET="$RUST_TARGET_ARCH-apple-darwin"
           elif [ "$RUST_OS" = "windows" ]; then
-            # Windows: 使用 *-pc-windows-gnu 格式 (与您的 Go/Rust 编译配置一致)
+            # Windows: *-pc-windows-gnu 格式
             TARGET="$RUST_TARGET_ARCH-pc-windows-gnu"
           elif [ "$RUST_OS" = "linux" ]; then
-            # Linux: 使用 *-unknown-linux-gnu 格式
+            # Linux: *-unknown-linux-gnu 格式
             TARGET="$RUST_TARGET_ARCH-unknown-linux-gnu"
           else
             echo "Error: Unknown OS $RUST_OS"
             exit 1
           fi
           
-          # Windows ARM64 特殊处理：如果目标不支持，使用 x86_64
+          # Windows ARM64 特殊处理：如果目标不支持，回退到 x86_64
           if [ "$RUST_OS" = "windows" ] && [ "$RUST_ARCH" = "arm64" ]; then
-            echo "Warning: Windows ARM64 not supported, using x86_64 instead"
+            echo "Warning: Windows ARM64 target not generally supported by common toolchains, falling back to x86_64-pc-windows-gnu for Rust."
             TARGET="x86_64-pc-windows-gnu"
           fi
           
@@ -150,9 +150,8 @@ jobs:
             TARGET="$RUST_ARCH_MAPPED-pc-windows-gnu"
           fi
           
-          # Windows ARM64 特殊处理：如果目标不支持，使用 x86_64
+          # Windows ARM64 特殊处理：使用 x86_64 的目标
           if [ "${{ matrix.goos }}" = "windows" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
-            echo "Warning: Windows ARM64 not supported, using x86_64 instead"
             TARGET="x86_64-pc-windows-gnu"
           fi
           
@@ -160,6 +159,7 @@ jobs:
           if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
             cargo build --release --target="$TARGET" --config "target.aarch64-unknown-linux-gnu.linker = \"aarch64-linux-gnu-gcc\""
           elif [ "${{ matrix.goos }}" = "windows" ]; then
+            # 注意：此处假定即使是 Windows arm64 的 Go 编译，Rust 库也使用 x86_64 目标
             cargo build --release --target="$TARGET" --config "target.x86_64-pc-windows-gnu.linker = \"x86_64-w64-mingw32-gcc\""
           else
             cargo build --release --target="$TARGET"
@@ -168,8 +168,8 @@ jobs:
           # 复制构建的静态库 (CGO 需要)
           mkdir -p target/release
           if [ -d "target/$TARGET/release" ]; then
+            # 仅复制静态库，CGO主要依赖.a文件
             cp target/$TARGET/release/librust_markdown.a target/release/ || true
-            # 仅复制静态库，避免复制动态库时的文件类型冗余和潜在错误
           fi
         shell: bash
 
@@ -185,10 +185,12 @@ jobs:
 
           if [ "${{ matrix.goos }}" = "windows" ]; then
             output_name="${output_name}.exe"
+            # MinGW-w64 GCC 用于 Windows 交叉编译
             CC_CMD="x86_64-w64-mingw32-gcc"
           elif [ "${{ matrix.goos }}" = "linux" ]; then
-            LDFLAGS="-static" # Linux 静态链接
+            LDFLAGS="-static" # Linux 静态链接以减少运行时依赖
             if [ "${{ matrix.goarch }}" = "arm64" ]; then
+              # 用于 Linux aarch64 交叉编译
               CC_CMD="aarch64-linux-gnu-gcc"
             fi
           elif [ "${{ matrix.goos }}" = "darwin" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
@@ -229,6 +231,7 @@ jobs:
         run: |
           # 遍历所有二进制文件并计算 SHA256
           find artifacts -type f -exec basename {} \; | while read file; do
+            # 检查文件是否是二进制文件，并计算 SHA256
             if [[ "$file" != "checksums.txt" ]]; then
               sha256sum "artifacts/*/""$file" >> "artifacts/checksums.txt"
             fi
@@ -240,7 +243,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**
+          files: artifacts/**/polyagent-*
           draft: false
           prerelease: false
           generate_release_notes: true
