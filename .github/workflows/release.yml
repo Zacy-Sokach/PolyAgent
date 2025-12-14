@@ -47,11 +47,12 @@ jobs:
             runner: windows-latest
             goos: windows
             goarch: amd64
-          - os: windows
-            arch: arm64
-            runner: windows-latest
-            goos: windows
-            goarch: arm64
+          # Windows ARM64 暂时跳过，Rust 不支持 aarch64-pc-windows-gnu 目标
+          # - os: windows
+          #   arch: arm64
+          #   runner: windows-latest
+          #   goos: windows
+          #   goarch: arm64
 
     steps:
       - name: Checkout code
@@ -74,7 +75,7 @@ jobs:
           rustup target add x86_64-apple-darwin
           rustup target add aarch64-apple-darwin
           rustup target add x86_64-pc-windows-gnu
-          rustup target add aarch64-pc-windows-gnu
+          # 注意：aarch64-pc-windows-gnu 不在标准工具链中，暂时跳过
         shell: bash
 
       - name: Install cross-compilation tools (Linux)
@@ -121,7 +122,9 @@ jobs:
             fi
           elif [ "${{ matrix.goos }}" = "windows" ]; then
             if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              TARGET="aarch64-pc-windows-gnu"
+              # Windows ARM64 不受支持，使用 x86_64 代替
+              echo "Warning: Windows ARM64 not supported, using x86_64 instead"
+              TARGET="x86_64-pc-windows-gnu"
             else
               TARGET="x86_64-pc-windows-gnu"
             fi
