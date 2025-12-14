@@ -67,48 +67,19 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Install Required Rust Target (Final Fix)
+      - name: Install Required Rust Target
         run: |
-          RUST_OS="${{ matrix.goos }}"
-          RUST_ARCH="${{ matrix.goarch }}"
-          
-          # --- 步骤 1: Go 架构到 Rust 架构的名称映射 ---
-          # Go的amd64对应Rust的x86_64，Go的arm64对应Rust的aarch64
-          RUST_TARGET_ARCH=""
-          if [ "$RUST_ARCH" = "amd64" ]; then
-            RUST_TARGET_ARCH="x86_64"
-          elif [ "$RUST_ARCH" = "arm64" ]; then
-            RUST_TARGET_ARCH="aarch64"
-          else
-            echo "Error: Unknown architecture $RUST_ARCH"
-            exit 1
+          # 根据平台安装必要的 Rust target
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            # Windows 统一使用 x86_64-gnu target
+            rustup target add x86_64-pc-windows-gnu
+          elif [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+            # Linux ARM64 需要交叉编译 target
+            rustup target add aarch64-unknown-linux-gnu
+          elif [ "${{ matrix.goos }}" = "darwin" ]; then
+            # macOS 使用原生 target，无需额外安装
+            echo "Using native macOS target"
           fi
-
-          # --- 步骤 2: 构造完整的 Target Triple ---
-
-          TARGET=""
-          if [ "$RUST_OS" = "darwin" ]; then
-            # macOS: *-apple-darwin 格式
-            TARGET="$RUST_TARGET_ARCH-apple-darwin"
-          elif [ "$RUST_OS" = "windows" ]; then
-            # Windows: *-pc-windows-gnu 格式
-            TARGET="$RUST_TARGET_ARCH-pc-windows-gnu"
-          elif [ "$RUST_OS" = "linux" ]; then
-            # Linux: *-unknown-linux-gnu 格式
-            TARGET="$RUST_TARGET_ARCH-unknown-linux-gnu"
-          else
-            echo "Error: Unknown OS $RUST_OS"
-            exit 1
-          fi
-          
-          # Windows ARM64 特殊处理：如果目标不支持，回退到 x86_64
-          if [ "$RUST_OS" = "windows" ] && [ "$RUST_ARCH" = "arm64" ]; then
-            echo "Warning: Windows ARM64 target not generally supported by common toolchains, falling back to x86_64-pc-windows-gnu for Rust."
-            TARGET="x86_64-pc-windows-gnu"
-          fi
-          
-          echo "Installing required Rust target: $TARGET"
-          rustup target add $TARGET
         shell: bash
 
       - name: Install cross-compilation tools (Linux)
@@ -121,9 +92,8 @@ jobs:
       - name: Install cross-compilation tools (Windows)
         if: matrix.os == 'windows'
         run: |
-          # 针对 Windows x86_64 安装 MinGW-w64
-          sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64
+          # Windows 上预装了 MinGW-w64，无需额外安装
+          echo "Windows cross-compilation tools are pre-installed"
         shell: bash
         
       - name: Get Go dependencies
@@ -133,43 +103,31 @@ jobs:
         run: |
           cd internal/tui/rust_markdown
           
-          # 架构映射
-          RUST_ARCH_MAPPED=""
-          if [ "${{ matrix.goarch }}" = "amd64" ]; then
-            RUST_ARCH_MAPPED="x86_64"
-          elif [ "${{ matrix.goarch }}" = "arm64" ]; then
-            RUST_ARCH_MAPPED="aarch64"
-          fi
-          
-          # 设置目标三元组 (使用修正后的 RUST_ARCH_MAPPED)
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            TARGET="$RUST_ARCH_MAPPED-unknown-linux-gnu"
-          elif [ "${{ matrix.goos }}" = "darwin" ]; then
-            TARGET="$RUST_ARCH_MAPPED-apple-darwin"
+          # 根据平台选择构建方式
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            # macOS 原生构建
+            cargo build --release
+            mkdir -p target/release
+            cp target/release/librust_markdown.a target/release/ || true
           elif [ "${{ matrix.goos }}" = "windows" ]; then
-            TARGET="$RUST_ARCH_MAPPED-pc-windows-gnu"
-          fi
-          
-          # Windows ARM64 特殊处理：使用 x86_64 的目标
-          if [ "${{ matrix.goos }}" = "windows" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+            # Windows 统一使用 x86_64 目标
             TARGET="x86_64-pc-windows-gnu"
-          fi
-          
-          # 为交叉编译设置链接器
-          if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
-            cargo build --release --target="$TARGET" --config "target.aarch64-unknown-linux-gnu.linker = \"aarch64-linux-gnu-gcc\""
-          elif [ "${{ matrix.goos }}" = "windows" ]; then
-            # 注意：此处假定即使是 Windows arm64 的 Go 编译，Rust 库也使用 x86_64 目标
-            cargo build --release --target="$TARGET" --config "target.x86_64-pc-windows-gnu.linker = \"x86_64-w64-mingw32-gcc\""
-          else
             cargo build --release --target="$TARGET"
-          fi
-          
-          # 复制构建的静态库 (CGO 需要)
-          mkdir -p target/release
-          if [ -d "target/$TARGET/release" ]; then
-            # 仅复制静态库，CGO主要依赖.a文件
+            mkdir -p target/release
             cp target/$TARGET/release/librust_markdown.a target/release/ || true
+          elif [ "${{ matrix.goos }}" = "linux" ]; then
+            # Linux 根据架构选择目标
+            if [ "${{ matrix.goarch }}" = "arm64" ]; then
+              TARGET="aarch64-unknown-linux-gnu"
+              cargo build --release --target="$TARGET" --config "target.aarch64-unknown-linux-gnu.linker = \"aarch64-linux-gnu-gcc\""
+              mkdir -p target/release
+              cp target/$TARGET/release/librust_markdown.a target/release/ || true
+            else
+              # Linux amd64 原生构建
+              cargo build --release
+              mkdir -p target/release
+              cp target/release/librust_markdown.a target/release/ || true
+            fi
           fi
         shell: bash
 
@@ -185,8 +143,13 @@ jobs:
 
           if [ "${{ matrix.goos }}" = "windows" ]; then
             output_name="${output_name}.exe"
-            # MinGW-w64 GCC 用于 Windows 交叉编译
-            CC_CMD="x86_64-w64-mingw32-gcc"
+            # Windows 上使用预装的 MinGW-w64
+            if [ "${{ matrix.goarch }}" = "amd64" ]; then
+              CC_CMD="x86_64-w64-mingw32-gcc"
+            else
+              # Windows arm64 使用 x86_64 工具链
+              CC_CMD="x86_64-w64-mingw32-gcc"
+            fi
           elif [ "${{ matrix.goos }}" = "linux" ]; then
             LDFLAGS="-static" # Linux 静态链接以减少运行时依赖
             if [ "${{ matrix.goarch }}" = "arm64" ]; then
@@ -194,8 +157,8 @@ jobs:
               CC_CMD="aarch64-linux-gnu-gcc"
             fi
           elif [ "${{ matrix.goos }}" = "darwin" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
-            # macOS ARM64 交叉编译
-            CC_CMD="arm64-apple-darwin20.2-clang"
+            # macOS ARM64 原生构建，无需交叉编译
+            echo "Building for macOS ARM64 natively"
           fi
           
           # 导出环境变量
