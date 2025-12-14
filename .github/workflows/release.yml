@@ -133,34 +133,33 @@ jobs:
         run: |
           cd internal/tui/rust_markdown
           
-          # 设置目标三元组 (与上方 Install Rust Target 逻辑保持一致)
+          # 架构映射
+          RUST_ARCH_MAPPED=""
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            RUST_ARCH_MAPPED="x86_64"
+          elif [ "${{ matrix.goarch }}" = "arm64" ]; then
+            RUST_ARCH_MAPPED="aarch64"
+          fi
+          
+          # 设置目标三元组 (使用修正后的 RUST_ARCH_MAPPED)
           if [ "${{ matrix.goos }}" = "linux" ]; then
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              TARGET="aarch64-unknown-linux-gnu"
-            else
-              TARGET="x86_64-unknown-linux-gnu"
-            fi
+            TARGET="$RUST_ARCH_MAPPED-unknown-linux-gnu"
           elif [ "${{ matrix.goos }}" = "darwin" ]; then
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              TARGET="aarch64-apple-darwin"
-            else
-              TARGET="x86_64-apple-darwin"
-            fi
+            TARGET="$RUST_ARCH_MAPPED-apple-darwin"
           elif [ "${{ matrix.goos }}" = "windows" ]; then
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              # Windows ARM64 使用 x86_64 代替
-              TARGET="x86_64-pc-windows-gnu"
-            else
-              TARGET="x86_64-pc-windows-gnu"
-            fi
+            TARGET="$RUST_ARCH_MAPPED-pc-windows-gnu"
+          fi
+          
+          # Windows ARM64 特殊处理：如果目标不支持，使用 x86_64
+          if [ "${{ matrix.goos }}" = "windows" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+            echo "Warning: Windows ARM64 not supported, using x86_64 instead"
+            TARGET="x86_64-pc-windows-gnu"
           fi
           
           # 为交叉编译设置链接器
           if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
-            # 针对 Linux ARM64 显式指定链接器
             cargo build --release --target="$TARGET" --config "target.aarch64-unknown-linux-gnu.linker = \"aarch64-linux-gnu-gcc\""
           elif [ "${{ matrix.goos }}" = "windows" ]; then
-            # 针对 Windows 显式指定 MinGW-w64 链接器
             cargo build --release --target="$TARGET" --config "target.x86_64-pc-windows-gnu.linker = \"x86_64-w64-mingw32-gcc\""
           else
             cargo build --release --target="$TARGET"
