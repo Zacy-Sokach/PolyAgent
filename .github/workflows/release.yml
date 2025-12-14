@@ -70,23 +70,27 @@ jobs:
 
       - name: Install Rust targets
         run: |
-          # 只安装当前构建需要的目标
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              rustup target add aarch64-unknown-linux-gnu
-            else
-              rustup target add x86_64-unknown-linux-gnu
-            fi
-          elif [ "${{ matrix.goos }}" = "darwin" ]; then
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              rustup target add aarch64-apple-darwin
-            else
-              rustup target add x86_64-apple-darwin
-            fi
-          elif [ "${{ matrix.goos }}" = "windows" ]; then
-            # Windows 只支持 x86_64
-            rustup target add x86_64-pc-windows-gnu
+          # 根据当前矩阵变量动态确定 Rust 目标
+          RUST_TARGET="${{ matrix.goarch }}-unknown-${{ matrix.goos }}-gnu"
+          
+          # 修正 Windows targets 的 triple：windows 使用 pc-vendor
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            RUST_TARGET="${{ matrix.goarch }}-pc-windows-gnu"
           fi
+          
+          # 修正 macOS targets 的 triple：macOS 使用 apple-vendor
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            RUST_TARGET="${{ matrix.goarch }}-apple-darwin"
+          fi
+          
+          # Windows ARM64 暂不支持，使用 x86_64 代替
+          if [ "${{ matrix.goos }}" = "windows" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+            echo "Warning: Windows ARM64 not supported, using x86_64 instead"
+            RUST_TARGET="x86_64-pc-windows-gnu"
+          fi
+          
+          echo "Installing required Rust target: $RUST_TARGET"
+          rustup target add $RUST_TARGET
         shell: bash
 
       - name: Install cross-compilation tools (Linux)
