@@ -61,81 +61,15 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.5'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Install Required Rust Target
-        run: |
-          # 根据平台安装必要的 Rust target
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            # Windows 统一使用 x86_64-gnu target
-            rustup target add x86_64-pc-windows-gnu
-          elif [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
-            # Linux ARM64 需要交叉编译 target
-            rustup target add aarch64-unknown-linux-gnu
-          elif [ "${{ matrix.goos }}" = "darwin" ]; then
-            # macOS 使用原生 target，无需额外安装
-            echo "Using native macOS target"
-          fi
-        shell: bash
-
-      - name: Install cross-compilation tools (Linux)
-        if: matrix.os == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
-        shell: bash
-
-      - name: Install cross-compilation tools (Windows)
-        if: matrix.os == 'windows'
-        run: |
-          # Windows 上预装了 MinGW-w64，无需额外安装
-          echo "Windows cross-compilation tools are pre-installed"
-        shell: bash
         
       - name: Get Go dependencies
         run: go mod download
 
-      - name: Build Rust library
-        run: |
-          cd internal/tui/rust_markdown
-          
-          # 根据平台选择构建方式
-          if [ "${{ matrix.goos }}" = "darwin" ]; then
-            # macOS 原生构建
-            cargo build --release
-            mkdir -p target/release
-            cp target/release/librust_markdown.a target/release/ || true
-          elif [ "${{ matrix.goos }}" = "windows" ]; then
-            # Windows 统一使用 x86_64 目标
-            TARGET="x86_64-pc-windows-gnu"
-            cargo build --release --target="$TARGET"
-            mkdir -p target/release
-            cp target/$TARGET/release/librust_markdown.a target/release/ || true
-          elif [ "${{ matrix.goos }}" = "linux" ]; then
-            # Linux 根据架构选择目标
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              TARGET="aarch64-unknown-linux-gnu"
-              cargo build --release --target="$TARGET" --config "target.aarch64-unknown-linux-gnu.linker = \"aarch64-linux-gnu-gcc\""
-              mkdir -p target/release
-              cp target/$TARGET/release/librust_markdown.a target/release/ || true
-            else
-              # Linux amd64 原生构建
-              cargo build --release
-              mkdir -p target/release
-              cp target/release/librust_markdown.a target/release/ || true
-            fi
-          fi
-        shell: bash
-
-      - name: Build binary (Optimized CC/LDFLAGS)
+      - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 1
+          CGO_ENABLED: 0
         run: |
           output_name="polyagent-${{ matrix.os }}-${{ matrix.arch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
