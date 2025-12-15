@@ -492,9 +492,6 @@ func (m Model) formatMessages() string {
 				messageCount-startIndex, messageCount)))
 	}
 	
-	// 获取 Markdown 渲染器单例，避免重复创建
-	mdRenderer := GetMarkdownRenderer()
-	
 	// 渲染从startIndex开始的消息
 	for i := startIndex; i < messageCount; i++ {
 		msg := m.messages[i]
@@ -505,9 +502,8 @@ func (m Model) formatMessages() string {
 			sb.WriteString("\n\n")
 		case "assistant":
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("AI: "))
-			// 使用单例渲染器，避免重复初始化
-			renderedContent := mdRenderer.Render(msg.Content)
-			sb.WriteString(renderedContent)
+			// 直接显示原始内容
+			sb.WriteString(msg.Content)
 			sb.WriteString("\n\n")
 		case "system":
 			// 只显示工具调用、工具结果和错误消息，不显示长的系统提示
@@ -517,13 +513,11 @@ func (m Model) formatMessages() string {
 				strings.Contains(content, "✅") ||
 				strings.Contains(content, "❌") ||
 				strings.Contains(content, "工具执行") ||
-				strings.Contains(content, "AI 请求使用工具") {
-				sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
-				// 使用单例渲染器
-				renderedContent := mdRenderer.Render(content)
-				sb.WriteString(renderedContent)
-				sb.WriteString("\n\n")
-			}
+							strings.Contains(content, "AI 请求使用工具") {
+							sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
+							// 直接显示原始内容
+							sb.WriteString(content)
+							sb.WriteString("\n\n")			}
 		}
 	}
 	return sb.String()
@@ -577,9 +571,6 @@ func (m Model) formatMessagesWithoutLastAssistant() string {
 				endIndex-startIndex, messageCount)))
 	}
 	
-	// 获取 Markdown 渲染器单例
-	mdRenderer := GetMarkdownRenderer()
-	
 	// 渲染从startIndex开始的消息
 	for i := startIndex; i < endIndex; i++ {
 		msg := tempMessages[i]
@@ -590,8 +581,8 @@ func (m Model) formatMessagesWithoutLastAssistant() string {
 			sb.WriteString("\n\n")
 		case "assistant":
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("AI: "))
-			renderedContent := mdRenderer.Render(msg.Content)
-			sb.WriteString(renderedContent)
+			// 直接显示原始内容
+			sb.WriteString(msg.Content)
 			sb.WriteString("\n\n")
 		case "system":
 			content := msg.Content
@@ -600,12 +591,10 @@ func (m Model) formatMessagesWithoutLastAssistant() string {
 				strings.Contains(content, "✅") ||
 				strings.Contains(content, "❌") ||
 				strings.Contains(content, "工具执行") ||
-				strings.Contains(content, "AI 请求使用工具") {
-				sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
-				renderedContent := mdRenderer.Render(content)
-				sb.WriteString(renderedContent)
-				sb.WriteString("\n\n")
-			}
+							strings.Contains(content, "AI 请求使用工具") {
+							sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
+							sb.WriteString(content)
+							sb.WriteString("\n\n")			}
 		}
 	}
 	return sb.String()
@@ -630,9 +619,6 @@ func (m *Model) renderOptimizedViewport() {
 		}
 	}
 	
-	// 获取 Markdown 渲染器单例
-	mdRenderer := GetMarkdownRenderer()
-	
 	// 添加思考内容（增量更新）
 	if m.currentThink != "" {
 		displayContent.WriteString("\n")
@@ -645,38 +631,7 @@ func (m *Model) renderOptimizedViewport() {
 	if m.currentResp != "" {
 		displayContent.WriteString("\n")
 		displayContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("AI: "))
-		
-		// 对于流式响应，减少markdown解析频率
-		respLen := len(m.currentResp)
-		shouldParseMarkdown := false
-		
-		// 长消息：每1000字符解析一次
-		if respLen > 0 && respLen%1000 == 0 {
-			shouldParseMarkdown = true
-		}
-		
-		// 短消息或句子结束时解析
-		if respLen < 500 && respLen > 0 {
-			lastChar := m.currentResp[respLen-1:]
-			if lastChar == "." || lastChar == "!" || lastChar == "?" || lastChar == "\n" {
-				shouldParseMarkdown = true
-			}
-		}
-		
-		// 短响应（<200字符）直接解析，提供更好的视觉体验
-		if respLen < 200 {
-			shouldParseMarkdown = true
-		}
-		
-		if shouldParseMarkdown {
-			// 使用单例渲染器
-			renderedResp := mdRenderer.Render(m.currentResp)
-			displayContent.WriteString(renderedResp)
-		} else {
-			// 直接显示原始文本，减少CPU开销
-			displayContent.WriteString(m.currentResp)
-		}
-		
+		displayContent.WriteString(m.currentResp)
 		displayContent.WriteString("█")
 	}
 	
@@ -703,9 +658,6 @@ func (m *Model) updateRenderedLinesCache() {
 	var sb strings.Builder
 	sb.Grow(maxCacheMessages * 200)
 	
-	// 获取 Markdown 渲染器单例
-	mdRenderer := GetMarkdownRenderer()
-	
 	// 渲染消息到缓存（排除最后一条正在输入的）
 	endIndex := messageCount
 	if endIndex > 0 && m.messages[endIndex-1].Role == "assistant" && m.thinking {
@@ -716,29 +668,27 @@ func (m *Model) updateRenderedLinesCache() {
 		msg := m.messages[i]
 		switch msg.Role {
 		case "user":
-			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("你: "))
-			sb.WriteString(msg.Content)
-			sb.WriteString("\n\n")
-		case "assistant":
-			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("AI: "))
-			renderedContent := mdRenderer.Render(msg.Content)
-			sb.WriteString(renderedContent)
-			sb.WriteString("\n\n")
-		case "system":
-			content := msg.Content
-			if len(content) < 100 ||
-				strings.Contains(content, "🔧") ||
-				strings.Contains(content, "✅") ||
-				strings.Contains(content, "❌") ||
-				strings.Contains(content, "工具执行") ||
-				strings.Contains(content, "AI 请求使用工具") {
-				sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
-				renderedContent := mdRenderer.Render(content)
-				sb.WriteString(renderedContent)
-				sb.WriteString("\n\n")
-			}
-		}
-	}
+					sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("你: "))
+					sb.WriteString(msg.Content)
+					sb.WriteString("\n\n")
+				case "assistant":
+					sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render("AI: "))
+					// 直接显示原始内容
+					sb.WriteString(msg.Content)
+					sb.WriteString("\n\n")
+				case "system":
+					content := msg.Content
+					if len(content) < 100 ||
+						strings.Contains(content, "🔧") ||
+						strings.Contains(content, "✅") ||
+						strings.Contains(content, "❌") ||
+						strings.Contains(content, "工具执行") ||
+						strings.Contains(content, "AI 请求使用工具") {
+						sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Render("系统: "))
+						sb.WriteString(content)
+						sb.WriteString("\n\n")
+					}
+				}	}
 	
 	// 将渲染结果按行缓存
 	content := sb.String()

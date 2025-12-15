@@ -127,8 +127,4 @@ func (s *RefactoredModelState) SetCurrentThinking(think string) {
 
 func (s *RefactoredModelState) SaveHistory() {
 	s.messageManager.SaveHistory()
-	// 清理异步渲染器（暂时禁用）
-	// if s.perfManager.asyncRenderer != nil {
-	// 	s.perfManager.asyncRenderer.ClearCache()
-	// }
 }

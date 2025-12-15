@@ -138,32 +138,9 @@ jobs:
           CGO_ENABLED: 1
         run: |
           output_name="polyagent-${{ matrix.os }}-${{ matrix.arch }}"
-          CC_CMD=""
-          LDFLAGS=""
-
           if [ "${{ matrix.goos }}" = "windows" ]; then
             output_name="${output_name}.exe"
-            # Windows 上使用预装的 MinGW-w64
-            if [ "${{ matrix.goarch }}" = "amd64" ]; then
-              CC_CMD="x86_64-w64-mingw32-gcc"
-            else
-              # Windows arm64 使用 x86_64 工具链
-              CC_CMD="x86_64-w64-mingw32-gcc"
-            fi
-          elif [ "${{ matrix.goos }}" = "linux" ]; then
-            LDFLAGS="-static" # Linux 静态链接以减少运行时依赖
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              # 用于 Linux aarch64 交叉编译
-              CC_CMD="aarch64-linux-gnu-gcc"
-            fi
-          elif [ "${{ matrix.goos }}" = "darwin" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
-            # macOS ARM64 原生构建，无需交叉编译
-            echo "Building for macOS ARM64 natively"
           fi
-          
-          # 导出环境变量
-          if [ -n "$CC_CMD" ]; then export CC=$CC_CMD; fi
-          if [ -n "$LDFLAGS" ]; then export CGO_LDFLAGS=$LDFLAGS; fi
           
           go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o "${output_name}" ./cmd/polyagent
         shell: bash
